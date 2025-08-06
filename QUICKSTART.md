@@ -24,15 +24,29 @@ SERPER_API_KEY=your_key_here
 
 ### 3. Test & Run
 ```bash
-# Quick test
+# Quick test (uses faster rate limiting)
 python -m limco.main test
 
-# Run with example project
+# Run with example project (safe rate limiting)
 python -m limco.main run
 
 # Run with your goal
 python -m limco.main run "Build a mobile app for..."
+
+# For users with premium API accounts (faster)
+python -m limco.main run-fast "Your project here..."
 ```
+
+## 🛡️ Rate Limiting Explained
+
+Limco automatically handles API rate limits to prevent quota exhaustion:
+
+- **Default mode**: Conservative (3s delays, safer for all users)
+- **Fast mode**: Aggressive (1.5s delays, for premium API accounts)
+- **Smart retries**: Exponential backoff with up to 6 attempts
+- **Error handling**: Graceful degradation when limits are hit
+
+**If you get rate limit errors**: Use default mode and wait a few minutes before retrying.
 
 ## 🎯 What Happens Next
 

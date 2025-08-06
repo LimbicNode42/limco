@@ -35,15 +35,59 @@ SERPER_API_KEY=your_serper_api_key_here
 
 ### First Run
 ```bash
-# Test the system
+# Test the system (uses faster rate limiting)
 python -m limco.main test
 
-# Run with example project
+# Test with conservative rate limiting (safer)
+python -m limco.main test-safe
+
+# Run with example project (conservative rate limiting)
 python -m limco.main run
+
+# Run with aggressive rate limiting (faster but may hit limits)
+python -m limco.main run-fast
 
 # Run with your own goal
 python -m limco.main run "Your project description here..."
 ```
+
+## 🛡️ Rate Limiting & API Management
+
+Limco includes intelligent rate limiting to prevent API quota exhaustion and handle rate limits gracefully.
+
+### Rate Limiting Modes
+
+**Conservative Mode (Default - Recommended)**
+- 3 second delays between operations
+- Up to 6 retry attempts with exponential backoff
+- Maximum 3 minute retry delays
+- Best for: Standard API accounts, production use
+
+**Aggressive Mode (For Premium Users)**
+- 1.5 second delays between operations  
+- Up to 4 retry attempts with exponential backoff
+- Maximum 1 minute retry delays
+- Best for: Premium API accounts, testing
+
+### Commands with Rate Limiting
+
+```bash
+# Conservative (safer, slower)
+python -m limco.main run               # Default mode
+python -m limco.main test-safe         # Conservative testing
+
+# Aggressive (faster, may hit limits)  
+python -m limco.main run-fast          # Aggressive mode
+python -m limco.main test              # Aggressive testing
+```
+
+### Handling Rate Limits
+
+If you encounter rate limit errors:
+1. **Wait and retry** - Rate limits usually reset after a few minutes
+2. **Use conservative mode** - `python -m limco.main run` (default)
+3. **Check API quotas** - Ensure you have sufficient API credits
+4. **Customize settings** - Edit `rate_limiting.conf` for your needs
 
 ## 🏗️ What You Get
 

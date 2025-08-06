@@ -5,6 +5,14 @@ import os
 from datetime import datetime
 from pathlib import Path
 from limco.crew import Limco
+from limco.utils.rate_limited_crew import create_rate_limited_crew
+import logging
+
+# Configure logging for rate limiting feedback
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 
 # Load environment variables from .env file
 try:
@@ -18,6 +26,10 @@ except ImportError:
     print("🔧 Attempting to load environment variables from system...")
 
 warnings.filterwarnings("ignore", category=SyntaxWarning, module="pysbd")
+
+# Global variables for rate limiting configuration
+_run_aggressive_mode = False
+_test_aggressive_mode = True  # Default to aggressive for testing
 
 def run():
     """
@@ -65,7 +77,21 @@ def run():
     }
     
     try:
-        result = Limco().crew().kickoff(inputs=inputs)
+        # Create standard crew
+        crew = Limco().crew()
+        
+        # Wrap with rate limiting (conservative mode for API limits)
+        aggressive_mode = _run_aggressive_mode
+        rate_limited_crew = create_rate_limited_crew(crew, aggressive_mode=aggressive_mode)
+        
+        mode_desc = "Aggressive (faster)" if aggressive_mode else "Conservative (safer)"
+        delays = "1.5s delays, 4 retries" if aggressive_mode else "3s delays, 6 retries"
+        print(f"🛡️ Rate limiting enabled: {mode_desc} ({delays})")
+        if not aggressive_mode:
+            print("⏱️ This may take longer but will handle API rate limits gracefully")
+        print("="*80)
+        
+        result = rate_limited_crew.kickoff(inputs)
         
         print("\n" + "="*80)
         print("✅ Autonomous development planning completed!")
@@ -76,6 +102,10 @@ def run():
         
     except Exception as e:
         print(f"❌ An error occurred while running the crew: {e}")
+        print("💡 Consider:")
+        print("   - Checking your API key balance")
+        print("   - Using a simpler goal for testing")
+        print("   - Waiting a few minutes before retrying")
         raise Exception(f"An error occurred while running the crew: {e}")
 
 
@@ -104,11 +134,25 @@ def train():
     }
     
     try:
-        Limco().crew().train(n_iterations=iterations, filename=filename, inputs=inputs)
+        # Create crew and wrap with rate limiting for training
+        crew = Limco().crew()
+        rate_limited_crew = create_rate_limited_crew(crew, aggressive_mode=False)
+        
+        print(f"🎯 Training with rate limiting: {iterations} iterations")
+        print("🛡️ Using conservative rate limiting for training stability")
+        print("⏱️ This will take longer but prevent API rate limit issues")
+        print("="*60)
+        
+        result = rate_limited_crew.train(iterations, filename, inputs)
         print(f"✅ Training completed for {iterations} iterations")
+        return result
         
     except Exception as e:
         print(f"❌ An error occurred while training the crew: {e}")
+        print("💡 Training requires significant API usage - consider:")
+        print("   - Using fewer iterations")
+        print("   - Checking API quota limits")
+        print("   - Training during off-peak hours")
         raise Exception(f"An error occurred while training the crew: {e}")
 
 
@@ -152,12 +196,30 @@ def test():
     }
     
     try:
-        result = Limco().crew().kickoff(inputs=inputs)
+        # Create standard crew
+        crew = Limco().crew()
+        
+        # Use aggressive mode for testing (faster but still rate limited)
+        aggressive_mode = _test_aggressive_mode
+        rate_limited_crew = create_rate_limited_crew(crew, aggressive_mode=aggressive_mode)
+        
+        mode_desc = "Aggressive (faster)" if aggressive_mode else "Conservative (safer)"  
+        delays = "1.5s delays, 4 retries" if aggressive_mode else "3s delays, 6 retries"
+        print(f"🛡️ Rate limiting enabled: Test mode ({delays})")
+        if aggressive_mode:
+            print("⚡ Using faster settings for testing")
+        else:
+            print("🐌 Using conservative settings for testing")
+        print("="*60)
+        
+        result = rate_limited_crew.kickoff(inputs)
         print("✅ Test completed successfully!")
         return result
         
     except Exception as e:
         print(f"❌ Test failed: {e}")
+        print("💡 This is normal if you hit rate limits during testing")
+        print("   Try again in a few minutes or use 'run' with a real project")
         raise Exception(f"An error occurred while testing the crew: {e}")
 
 
@@ -166,10 +228,12 @@ if __name__ == "__main__":
     Command line interface for Limco Autonomous Software Development Company
     
     Commands:
-    - run: Execute the full development planning process (default)
-    - train <iterations> <filename>: Train the crew
-    - replay <task_id>: Replay from a specific task
-    - test: Test with a simple goal
+    - run [goal]: Execute development planning process (default)
+    - run-fast [goal]: Execute with aggressive rate limiting (faster but may hit limits)
+    - train <iterations> <filename>: Train the crew with rate limiting
+    - replay <task_id>: Replay from a specific task  
+    - test: Test with a simple goal (uses aggressive rate limiting)
+    - test-safe: Test with conservative rate limiting
     """
     
     if len(sys.argv) > 1:
@@ -185,10 +249,47 @@ if __name__ == "__main__":
             replay()
         elif command == "test":
             test()
+        elif command == "test-safe":
+            # Test with conservative rate limiting
+            print("🐌 Using conservative rate limiting for testing")
+            # Temporarily modify test function behavior
+            _test_aggressive_mode = False
+            test()
         elif command == "run":
             # Remove command and use remaining as goal
             sys.argv = sys.argv[1:]
             run()
+        elif command == "run-fast":
+            # Run with aggressive rate limiting
+            sys.argv = sys.argv[1:]  # Remove command
+            print("⚡ Using aggressive rate limiting (faster but may hit API limits)")
+            _run_aggressive_mode = True
+            run()
+        elif command in ["help", "--help", "-h"]:
+            print("""
+Limco - Autonomous Software Development Company
+
+Commands:
+  run [goal]              Execute development planning (default, conservative rate limiting)
+  run-fast [goal]         Execute with aggressive rate limiting (faster, for premium APIs)
+  test                    Test with simple goal (aggressive rate limiting)
+  test-safe               Test with conservative rate limiting (safer)
+  train <iterations> <filename>  Train the crew with rate limiting
+  replay <task_id>        Replay from specific task
+  help                    Show this help message
+
+Rate Limiting Modes:
+  Conservative (default): 3s delays, 6 retries, safer for standard API accounts
+  Aggressive (fast):      1.5s delays, 4 retries, for premium API accounts
+
+Examples:
+  python -m limco.main run "Build a CRM for small business"
+  python -m limco.main run-fast "Create a mobile app"
+  python -m limco.main test
+  python -m limco.main train 5 training_results.json
+
+For more information, see README.md and QUICKSTART.md
+            """)
         else:
             # Treat first argument as CEO goal
             run()
