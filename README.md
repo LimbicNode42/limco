@@ -1,54 +1,285 @@
-# Limco Crew
+# Limco - Autonomous Software Development Company
 
-Welcome to the Limco Crew project, powered by [crewAI](https://crewai.com). This template is designed to help you set up a multi-agent AI system with ease, leveraging the powerful and flexible framework provided by crewAI. Our goal is to enable your agents to collaborate effectively on complex tasks, maximizing their collective intelligence and capabilities.
+**Version**: 1.0  
+**Created**: 2025-08-06  
+**Author**: LimbicNode42  
 
-## Installation
+An AI-powered autonomous software development company built with CrewAI that can take high-level business goals and autonomously plan, analyze, and provide comprehensive project proposals.
 
-Ensure you have Python >=3.10 <3.14 installed on your system. This project uses [UV](https://docs.astral.sh/uv/) for dependency management and package handling, offering a seamless setup and execution experience.
+## 🚀 Quick Start
 
-First, if you haven't already, install uv:
+### Prerequisites
+- Python 3.10+
+- API Keys for AI services (OpenAI, Anthropic, or Google)
+- Optional: Serper API key for web search
 
+### Installation
 ```bash
-pip install uv
+cd limco
+pip install -e .
 ```
 
-Next, navigate to your project directory and install the dependencies:
-
-(Optional) Lock the dependencies and install them by using the CLI command:
+### Setup Environment
+Create a `.env` file:
 ```bash
-crewai install
-```
-### Customizing
+# Required: Choose one AI provider
+OPENAI_API_KEY=your_openai_api_key_here
+# OR
+ANTHROPIC_API_KEY=your_anthropic_api_key_here  
+# OR
+GOOGLE_API_KEY=your_google_api_key_here
 
-**Add your `OPENAI_API_KEY` into the `.env` file**
-
-- Modify `src/limco/config/agents.yaml` to define your agents
-- Modify `src/limco/config/tasks.yaml` to define your tasks
-- Modify `src/limco/crew.py` to add your own logic, tools and specific args
-- Modify `src/limco/main.py` to add custom inputs for your agents and tasks
-
-## Running the Project
-
-To kickstart your crew of AI agents and begin task execution, run this from the root folder of your project:
-
-```bash
-$ crewai run
+# Optional: Web search for market research
+SERPER_API_KEY=your_serper_api_key_here
 ```
 
-This command initializes the limco Crew, assembling the agents and assigning them tasks as defined in your configuration.
+### First Run
+```bash
+# Test the system
+python -m limco.main test
 
-This example, unmodified, will run the create a `report.md` file with the output of a research on LLMs in the root folder.
+# Run with example project
+python -m limco.main run
 
-## Understanding Your Crew
+# Run with your own goal
+python -m limco.main run "Your project description here..."
+```
 
-The limco Crew is composed of multiple AI agents, each with unique roles, goals, and tools. These agents collaborate on a series of tasks, defined in `config/tasks.yaml`, leveraging their collective skills to achieve complex objectives. The `config/agents.yaml` file outlines the capabilities and configurations of each agent in your crew.
+## 🏗️ What You Get
 
-## Support
+### 10 Specialized AI Agents
+**Core Development Crew (8 agents):**
+- **CTO/Overseer** - Strategic technical leadership
+- **Engineering Manager** - Resource planning and timelines  
+- **Product Manager** - Requirements and scope definition
+- **Staff Engineer** - Technical architecture design
+- **Senior Backend Engineer** - Backend/API implementation
+- **Senior Frontend Engineer** - Frontend/UX implementation
+- **DevOps Engineer** - Infrastructure and deployment
+- **QA Engineer** - Quality strategy and testing
 
-For support, questions, or feedback regarding the Limco Crew or crewAI.
-- Visit our [documentation](https://docs.crewai.com)
-- Reach out to us through our [GitHub repository](https://github.com/joaomdmoura/crewai)
-- [Join our Discord](https://discord.com/invite/X4JWnZnxPb)
-- [Chat with our docs](https://chatg.pt/DWjSBZn)
+**Business Crew (2 agents):**
+- **Token Economics Agent** - Cost analysis and ROI
+- **Business Development Agent** - Revenue strategy and market validation
 
-Let's create wonders together with the power and simplicity of crewAI.
+### 5-Phase Autonomous Process
+1. **Goal Intake** - Strategic analysis and direction
+2. **Technical Planning** - Architecture and resource estimation
+3. **Business Analysis** - Cost analysis and revenue strategy
+4. **Quality Planning** - Infrastructure and testing strategy
+5. **Implementation Coordination** - Detailed implementation plans
+
+## 🎯 Team Structure
+
+## Detailed Role Definitions
+
+### Phase 1: Goal Intake & Initial Planning
+
+#### **Overseer/CTO Agent**
+**Role**: Strategic Technical Leadership & CEO Interface
+
+**Responsibilities**:
+- Receives high-level goals from CEO (LimbicNode42)
+- Translates business objectives into technical strategy
+- Coordinates all crews and ensures alignment
+- Primary point of contact for CEO communications
+- Makes final technical architecture decisions
+- Consolidates team inputs into executive summaries
+
+**Reports to**: CEO (LimbicNode42)  
+**Manages**: All technical crews  
+**Key Deliverables**: Strategic direction, executive summaries, final recommendations
+
+#### **Product Manager Agent**
+**Role**: Requirements & Scope Definition
+
+**Responsibilities**:
+- Breaks down CEO goals into user stories and requirements
+- Defines success metrics and acceptance criteria
+- Conducts market research and competitive analysis
+- Prioritizes features based on business value
+- Creates detailed product requirements documents
+
+**Collaborates with**: Business Development Agent for market insights  
+**Key Deliverables**: Product requirements document, user stories, success metrics
+
+### Phase 2: Technical Planning & Estimation
+
+#### **Engineering Manager Agent**
+**Role**: Resource Planning & Timeline Estimation
+
+**Responsibilities**:
+- Estimates effort and timeline for all technical work
+- Assigns tasks across engineering team based on skills/capacity
+- Identifies risks and dependencies
+- Creates sprint plans and milestone schedules
+- Coordinates team resources and manages capacity
+
+**Collaborates with**: Staff Engineer for technical complexity assessment  
+**Key Deliverables**: Project timeline, resource allocation, risk assessment, sprint plans
+
+#### **Staff Engineer Agent**
+**Role**: Technical Architecture & Design
+
+**Responsibilities**:
+- Designs system architecture and technical approach
+- Identifies technical risks and complexity factors
+- Provides accurate effort estimates for complex features
+- Defines technical standards and best practices
+- Mentors senior engineers on complex implementations
+
+**Collaborates with**: DevOps Engineer for infrastructure planning  
+**Key Deliverables**: Technical architecture document, implementation plan, technical standards
+
+### Phase 3: Business Analysis & Cost Planning
+
+#### **Token Economics Agent**
+**Role**: Cost Analysis & ROI Optimization
+
+**Responsibilities**:
+- Calculates development costs (token usage, compute resources)
+- Projects ROI based on timeline and resource requirements
+- Identifies cost optimization opportunities
+- Monitors real-time spending during execution
+- Suggests model optimizations and prompt improvements
+- Tracks budget vs actual spending
+
+**Collaborates with**: Engineering Manager for resource estimates  
+**Key Deliverables**: Cost analysis, budget recommendations, ROI projections, cost monitoring reports
+
+#### **Business Development Agent**
+**Role**: Revenue Strategy & Market Validation
+
+**Responsibilities**:
+- Analyzes revenue potential of proposed features/products
+- Identifies potential customers, partners, or monetization strategies
+- Validates market demand and competitive positioning
+- Develops go-to-market strategy
+- Identifies partnership and licensing opportunities
+
+**Collaborates with**: Product Manager for market requirements  
+**Key Deliverables**: Revenue projections, market analysis, business case, go-to-market strategy
+
+### Phase 4: Quality & Operations Planning
+
+#### **DevOps Engineer Agent**
+**Role**: Infrastructure & Deployment Planning
+
+**Responsibilities**:
+- Plans infrastructure requirements and scaling needs
+- Designs CI/CD pipelines and deployment strategy
+- Estimates infrastructure costs and operational overhead
+- Identifies security and compliance requirements
+- Manages deployment automation and monitoring
+
+**Collaborates with**: Staff Engineer for system requirements  
+**Key Deliverables**: Infrastructure plan, deployment strategy, operational costs, CI/CD setup
+
+#### **QA Engineer Agent**
+**Role**: Quality Strategy & Testing Planning
+
+**Responsibilities**:
+- Defines testing strategy and quality gates
+- Estimates testing effort and timeline
+- Identifies potential quality risks
+- Plans automation and manual testing approaches
+- Ensures code quality and performance standards
+
+**Collaborates with**: Engineering Manager for timeline integration  
+**Key Deliverables**: Testing strategy, quality metrics, testing timeline, test automation plans
+
+### Phase 5: Implementation Team
+
+#### **Senior Engineer Agent #1**
+**Role**: Lead Feature Development (Backend/API Focus)
+
+**Responsibilities**:
+- Implements core features and complex functionality
+- Mentors junior developers and reviews code
+- Ensures technical standards are maintained
+- Coordinates with other engineers on integrations
+- Focuses on backend systems, APIs, and data architecture
+
+**Reports to**: Engineering Manager  
+**Specialization**: Backend/API development, database design, system integrations
+
+#### **Senior Engineer Agent #2**
+**Role**: Frontend & User Experience Development
+
+**Responsibilities**:
+- Implements user interfaces and user experience
+- Ensures responsive design and accessibility
+- Optimizes frontend performance
+- Coordinates with Product Manager on UX decisions
+- Maintains design system and UI components
+
+**Reports to**: Engineering Manager  
+**Specialization**: Frontend/UI development, user experience, design systems
+
+## 🔧 API Setup Options
+
+### Option 1: OpenAI (Recommended)
+**Cost**: ~$2-5 per project analysis | **Quality**: Excellent
+```bash
+OPENAI_API_KEY=your_openai_api_key_here
+OPENAI_MODEL_NAME=gpt-4
+```
+
+### Option 2: Anthropic Claude (Great for Analysis)
+**Cost**: ~$0.50-1.50 per analysis | **Quality**: Excellent for detailed docs
+```bash
+ANTHROPIC_API_KEY=your_anthropic_api_key_here
+MODEL_NAME=claude-3-sonnet-20240229
+```
+
+### Option 3: Google Gemini (Most Affordable)
+**Cost**: ~$0.10-0.30 per analysis | **Quality**: Good
+```bash
+GOOGLE_API_KEY=your_google_api_key_here
+MODEL_NAME=gemini-pro
+```
+
+### Option 4: Mixed Models (Optimized)
+Use different models for different agents based on their strengths:
+```bash
+# Premium for critical programming decisions
+ANTHROPIC_API_KEY=your_anthropic_api_key_here
+
+# Fast planning and management
+GOOGLE_API_KEY=your_google_api_key_here
+
+# Optional: Web search for market research
+SERPER_API_KEY=your_serper_api_key_here
+```
+
+## 📝 Example Usage
+
+See `examples/example_goals.md` for detailed project examples including:
+- SaaS CRM Platform ($50k budget, 3-month timeline)
+- AI-Powered Task Management ($75k budget, 4-month timeline) 
+- E-commerce Analytics Platform ($100k budget, 6-month timeline)
+- Educational Content Platform ($80k budget, 7-month timeline)
+- Healthcare Practice Management ($120k budget, 10-month timeline)
+
+## 🎯 Expected Outputs
+
+Each project analysis provides:
+1. **Strategic Planning Document** - Technical strategy and approach
+2. **Product Requirements Document** - Detailed user stories and acceptance criteria
+3. **Technical Architecture Document** - System design and implementation plan
+4. **Project Management Plan** - Timeline, resources, and risk assessment
+5. **Financial Analysis Report** - Cost breakdown and ROI projections
+6. **Business Case & GTM Strategy** - Market analysis and revenue strategy
+7. **Infrastructure Plan** - DevOps and deployment strategy
+8. **Quality Assurance Strategy** - Testing approach and quality gates
+9. **Backend Implementation Plan** - API and database design
+10. **Frontend Implementation Plan** - UI/UX and responsive design
+11. **Executive Summary** - Consolidated recommendations and next steps
+
+## 🚀 What Makes Limco Special
+
+- **Autonomous Planning**: Takes high-level goals and creates detailed execution plans
+- **Multi-Model Optimization**: Uses the best AI model for each agent's strengths
+- **Cost-Aware**: Includes detailed cost analysis and ROI projections
+- **Business-Focused**: Combines technical planning with market analysis
+- **Production-Ready**: Includes infrastructure, testing, and deployment planning

@@ -1,17 +1,324 @@
-research_task:
-  description: >
-    Conduct a thorough research about {topic}
-    Make sure you find any interesting and relevant information given
-    the current year is {current_year}.
-  expected_output: >
-    A list with 10 bullet points of the most relevant information about {topic}
-  agent: researcher
+# =============================================================================
+# PHASE 1: GOAL INTAKE & INITIAL PLANNING
+# =============================================================================
 
-reporting_task:
+ceo_goal_intake:
   description: >
-    Review the context you got and expand each topic into a full section for a report.
-    Make sure the report is detailed and contains any and all relevant information.
+    Receive and analyze the high-level goal from CEO: {ceo_goal}
+    
+    Translate this business objective into technical strategy and coordinate 
+    initial planning across all crews. Identify key stakeholders, success criteria, 
+    and high-level technical approach.
+    
+    Create an initial strategic assessment including:
+    - Business objective analysis
+    - Technical feasibility assessment  
+    - Resource requirement estimates
+    - Risk identification
+    - Stakeholder coordination plan
   expected_output: >
-    A fully fledged report with the main topics, each with a full section of information.
-    Formatted as markdown without '```'
-  agent: reporting_analyst
+    A strategic planning document containing:
+    1. Business objective breakdown and interpretation
+    2. High-level technical strategy and approach
+    3. Initial feasibility assessment
+    4. Key stakeholders and coordination plan
+    5. Success criteria and metrics
+    6. High-level risk assessment
+    7. Next steps and crew coordination plan
+    
+    Format as structured markdown with clear sections and actionable recommendations.
+  agent: overseer_cto
+
+product_requirements_definition:
+  description: >
+    Based on the CEO goal and CTO strategic direction, break down the business 
+    objectives into detailed product requirements.
+    
+    Conduct market research and competitive analysis relevant to: {ceo_goal}
+    
+    Create comprehensive product requirements including:
+    - Detailed user stories and acceptance criteria
+    - Feature prioritization based on business value
+    - Success metrics and KPIs
+    - Market analysis and competitive positioning
+    - User personas and use cases
+  expected_output: >
+    A comprehensive Product Requirements Document (PRD) containing:
+    1. Executive summary of product vision
+    2. Detailed user stories with acceptance criteria
+    3. Feature prioritization matrix with business value scores
+    4. Success metrics and KPIs definition
+    5. Market research and competitive analysis
+    6. User personas and journey maps
+    7. Non-functional requirements
+    
+    Format as structured markdown with clear sections, tables, and prioritized lists.
+  agent: product_manager
+  context: [ceo_goal_intake]
+
+# =============================================================================
+# PHASE 2: TECHNICAL PLANNING & ESTIMATION
+# =============================================================================
+
+technical_architecture_design:
+  description: >
+    Design the technical architecture and implementation approach for the 
+    requirements defined in the PRD.
+    
+    Create detailed technical specifications including:
+    - System architecture diagrams and patterns
+    - Technology stack recommendations
+    - Database schema and data flow design
+    - API specifications and integration points
+    - Security and performance considerations
+    - Technical risk assessment and mitigation strategies
+  expected_output: >
+    A Technical Architecture Document containing:
+    1. High-level system architecture diagram
+    2. Technology stack recommendations with justifications
+    3. Database design and data flow diagrams
+    4. API specifications and integration architecture
+    5. Security architecture and compliance considerations
+    6. Performance requirements and scaling strategies
+    7. Technical risk assessment with mitigation plans
+    8. Implementation guidelines and coding standards
+    
+    Format as structured markdown with diagrams, code examples, and technical specifications.
+  agent: staff_engineer
+  context: [product_requirements_definition]
+
+resource_planning_and_estimation:
+  description: >
+    Create detailed project timeline, resource allocation, and effort estimation 
+    based on the technical architecture and product requirements.
+    
+    Develop comprehensive project management deliverables including:
+    - Sprint planning and milestone schedules
+    - Task breakdown and effort estimation
+    - Resource allocation across engineering team
+    - Risk and dependency identification
+    - Capacity planning and timeline optimization
+  expected_output: >
+    A Project Management Plan containing:
+    1. Detailed project timeline with milestones
+    2. Sprint breakdown with user stories assigned
+    3. Effort estimation for all technical tasks
+    4. Resource allocation matrix across team members
+    5. Risk register with mitigation strategies
+    6. Dependency mapping and critical path analysis
+    7. Capacity planning and workload distribution
+    8. Quality gates and delivery checkpoints
+    
+    Format as structured markdown with Gantt charts, tables, and timeline visualizations.
+  agent: engineering_manager
+  context: [technical_architecture_design, product_requirements_definition]
+
+# =============================================================================
+# PHASE 3: BUSINESS ANALYSIS & COST PLANNING
+# =============================================================================
+
+cost_analysis_and_roi_projection:
+  description: >
+    Calculate comprehensive development costs and ROI projections based on the 
+    project timeline and resource requirements.
+    
+    Analyze costs including:
+    - AI model token usage and compute costs
+    - Development team capacity costs
+    - Infrastructure and operational expenses
+    - Timeline-based cost projections
+    - ROI modeling and break-even analysis
+    - Cost optimization recommendations
+  expected_output: >
+    A Financial Analysis Report containing:
+    1. Detailed cost breakdown by category and timeline
+    2. Token usage projections and AI compute costs
+    3. Development team cost calculations
+    4. Infrastructure cost estimates and scaling projections
+    5. ROI analysis with multiple scenarios
+    6. Break-even analysis and payback period
+    7. Cost optimization recommendations
+    8. Budget recommendations and spending thresholds
+    
+    Format as structured markdown with financial tables, charts, and cost models.
+  agent: token_economics_agent
+  context: [resource_planning_and_estimation, technical_architecture_design]
+
+market_validation_and_revenue_strategy:
+  description: >
+    Analyze market opportunity and develop revenue strategy based on the 
+    product requirements and competitive landscape.
+    
+    Create comprehensive business case including:
+    - Market size and opportunity analysis
+    - Revenue projections and monetization strategies
+    - Competitive positioning and differentiation
+    - Go-to-market strategy and channel partnerships
+    - Customer acquisition and retention strategies
+  expected_output: >
+    A Business Case and Go-to-Market Strategy containing:
+    1. Market opportunity analysis with TAM/SAM/SOM
+    2. Revenue projections with multiple scenarios
+    3. Competitive analysis and positioning strategy
+    4. Monetization model recommendations
+    5. Go-to-market strategy and launch plan
+    6. Partnership and channel development opportunities
+    7. Customer acquisition cost and lifetime value analysis
+    8. Sales and marketing strategy recommendations
+    
+    Format as structured markdown with market analysis, financial projections, and strategy recommendations.
+  agent: business_development_agent
+  context: [product_requirements_definition]
+
+# =============================================================================
+# PHASE 4: QUALITY & OPERATIONS PLANNING
+# =============================================================================
+
+infrastructure_and_deployment_planning:
+  description: >
+    Design infrastructure architecture and deployment strategy based on the 
+    technical specifications and scaling requirements.
+    
+    Create comprehensive DevOps plan including:
+    - Infrastructure requirements and scaling strategy
+    - CI/CD pipeline design and automation
+    - Deployment strategy and rollback procedures
+    - Monitoring and observability implementation
+    - Security and compliance requirements
+    - Operational cost optimization
+  expected_output: >
+    An Infrastructure and DevOps Plan containing:
+    1. Infrastructure architecture diagrams and requirements
+    2. Cloud resource specifications and scaling strategies
+    3. CI/CD pipeline design with automation workflows
+    4. Deployment strategy with blue-green and rollback procedures
+    5. Monitoring, logging, and alerting implementation plan
+    6. Security architecture and compliance checklist
+    7. Operational cost estimates and optimization strategies
+    8. Disaster recovery and backup procedures
+    
+    Format as structured markdown with architecture diagrams, workflow charts, and operational procedures.
+  agent: devops_engineer
+  context: [technical_architecture_design, cost_analysis_and_roi_projection]
+
+quality_assurance_strategy:
+  description: >
+    Define comprehensive testing strategy and quality assurance approach 
+    based on the technical architecture and project timeline.
+    
+    Create detailed QA plan including:
+    - Testing strategy and methodology
+    - Test automation framework and implementation
+    - Quality metrics and acceptance criteria
+    - Performance and security testing approach
+    - Code quality standards and review processes
+  expected_output: >
+    A Quality Assurance Strategy containing:
+    1. Comprehensive testing strategy and methodology
+    2. Test automation framework and tool selection
+    3. Quality metrics and KPIs definition
+    4. Performance testing strategy and benchmarks
+    5. Security testing approach and vulnerability assessment
+    6. Code quality standards and review procedures
+    7. Testing timeline integration with development sprints
+    8. Quality gates and release criteria
+    
+    Format as structured markdown with testing frameworks, quality metrics, and process workflows.
+  agent: qa_engineer
+  context: [technical_architecture_design, resource_planning_and_estimation]
+
+# =============================================================================
+# PHASE 5: IMPLEMENTATION COORDINATION
+# =============================================================================
+
+backend_implementation_planning:
+  description: >
+    Create detailed implementation plan for backend systems, APIs, and data 
+    architecture based on the technical specifications.
+    
+    Develop comprehensive backend development plan including:
+    - API design and implementation strategy
+    - Database schema and data migration plans
+    - Backend service architecture and microservices design
+    - Integration patterns and third-party service connections
+    - Performance optimization and caching strategies
+  expected_output: >
+    A Backend Implementation Plan containing:
+    1. Detailed API specifications with endpoints and schemas
+    2. Database design with migration and seeding strategies
+    3. Backend service architecture and communication patterns
+    4. Third-party integration specifications and error handling
+    5. Performance optimization strategies and caching implementation
+    6. Security implementation for authentication and authorization
+    7. Code organization and development guidelines
+    8. Testing strategy for backend components
+    
+    Format as structured markdown with API documentation, database schemas, and implementation guidelines.
+  agent: senior_engineer_backend
+  context: [technical_architecture_design, infrastructure_and_deployment_planning]
+
+frontend_implementation_planning:
+  description: >
+    Create detailed implementation plan for user interface, user experience, 
+    and frontend architecture based on the product requirements.
+    
+    Develop comprehensive frontend development plan including:
+    - UI component design system and reusable components
+    - User experience flows and interaction patterns
+    - Frontend architecture and state management
+    - Responsive design and accessibility implementation
+    - Performance optimization and bundle strategies
+  expected_output: >
+    A Frontend Implementation Plan containing:
+    1. UI component library and design system specifications
+    2. User experience flows and wireframe documentation
+    3. Frontend architecture with state management patterns
+    4. Responsive design strategy and breakpoint definitions
+    5. Accessibility implementation guidelines (WCAG compliance)
+    6. Performance optimization strategies and bundle analysis
+    7. Code organization and component structure guidelines
+    8. Testing strategy for UI components and user flows
+    
+    Format as structured markdown with UI mockups, component specifications, and development guidelines.
+  agent: senior_engineer_frontend
+  context: [product_requirements_definition, technical_architecture_design]
+
+# =============================================================================
+# EXECUTIVE SUMMARY AND FINAL RECOMMENDATIONS
+# =============================================================================
+
+executive_summary_and_recommendations:
+  description: >
+    Consolidate all crew inputs into a comprehensive executive summary with 
+    final recommendations for CEO approval.
+    
+    Create a complete project proposal including:
+    - Executive summary of the complete plan
+    - Consolidated timeline and resource requirements
+    - Total cost analysis and ROI projections
+    - Risk assessment and mitigation strategies
+    - Final go/no-go recommendation with justification
+  expected_output: >
+    An Executive Summary and Project Proposal containing:
+    1. Executive summary with key recommendations
+    2. Consolidated project timeline and major milestones
+    3. Complete resource requirements and team allocation
+    4. Total cost analysis with ROI projections and scenarios
+    5. Comprehensive risk assessment with mitigation plans
+    6. Market opportunity and competitive positioning summary
+    7. Technical architecture overview and implementation approach
+    8. Final recommendation with clear go/no-go decision and justification
+    
+    Format as executive-level document with clear sections, summary tables, and actionable recommendations suitable for CEO review and decision-making.
+  agent: overseer_cto
+  context: [
+    product_requirements_definition,
+    technical_architecture_design, 
+    resource_planning_and_estimation,
+    cost_analysis_and_roi_projection,
+    market_validation_and_revenue_strategy,
+    infrastructure_and_deployment_planning,
+    quality_assurance_strategy,
+    backend_implementation_planning,
+    frontend_implementation_planning
+  ]
