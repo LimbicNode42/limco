@@ -58,15 +58,15 @@ Limco includes intelligent rate limiting to prevent API quota exhaustion and han
 ### Rate Limiting Modes
 
 **Conservative Mode (Default - Recommended)**
-- 3 second delays between operations
-- Up to 6 retry attempts with exponential backoff
-- Maximum 3 minute retry delays
+- 5 second delays between operations
+- Up to 8 retry attempts with exponential backoff
+- Maximum 5 minute retry delays
 - Best for: Standard API accounts, production use
 
 **Aggressive Mode (For Premium Users)**
-- 1.5 second delays between operations  
-- Up to 4 retry attempts with exponential backoff
-- Maximum 1 minute retry delays
+- 3 second delays between operations  
+- Up to 6 retry attempts with exponential backoff
+- Maximum 2 minute retry delays
 - Best for: Premium API accounts, testing
 
 ### Commands with Rate Limiting

@@ -26,9 +26,31 @@ except ImportError:
     print("🔧 Attempting to load environment variables from system...")
 
 warnings.filterwarnings("ignore", category=SyntaxWarning, module="pysbd")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="pydantic")
+
+# Suppress AgentOps warnings if not configured
+try:
+    import os
+    if not os.getenv("AGENTOPS_API_KEY"):
+        os.environ["AGENTOPS_API_KEY"] = "disabled"
+        os.environ["AGENTOPS_ENABLED"] = "false"
+except Exception:
+    pass
 
 # Global variables for rate limiting configuration
 _run_aggressive_mode = False
+
+def get_test_aggressive_mode():
+    """Get the current test aggressive mode setting."""
+    global _test_aggressive_mode
+    return _test_aggressive_mode
+
+def set_test_aggressive_mode(value):
+    """Set the test aggressive mode setting."""
+    global _test_aggressive_mode
+    _test_aggressive_mode = value
+
+# Default test mode
 _test_aggressive_mode = True  # Default to aggressive for testing
 
 def run():
@@ -85,7 +107,7 @@ def run():
         rate_limited_crew = create_rate_limited_crew(crew, aggressive_mode=aggressive_mode)
         
         mode_desc = "Aggressive (faster)" if aggressive_mode else "Conservative (safer)"
-        delays = "1.5s delays, 4 retries" if aggressive_mode else "3s delays, 6 retries"
+        delays = "3s delays, 6 retries" if aggressive_mode else "5s delays, 8 retries"
         print(f"🛡️ Rate limiting enabled: {mode_desc} ({delays})")
         if not aggressive_mode:
             print("⏱️ This may take longer but will handle API rate limits gracefully")
@@ -176,6 +198,52 @@ def replay():
         raise Exception(f"An error occurred while replaying the crew: {e}")
 
 
+def test_basic():
+    """
+    Basic functionality test - just check imports and configuration.
+    """
+    try:
+        print("🧪 Testing basic Limco functionality...")
+        print("🔧 Checking imports...")
+        
+        from limco.crew import Limco
+        from limco.utils.rate_limited_crew import create_rate_limited_crew
+        from limco.utils.rate_limiter import RateLimiter
+        
+        print("✅ All imports successful")
+        
+        print("🔧 Checking environment...")
+        import os
+        anthropic_key = os.getenv("ANTHROPIC_API_KEY", "")
+        google_key = os.getenv("GOOGLE_API_KEY", "")
+        serper_key = os.getenv("SERPER_API_KEY", "")
+        
+        print(f"🔑 Anthropic API: {'✅ Configured' if anthropic_key else '❌ Missing'}")
+        print(f"🔑 Google API: {'✅ Configured' if google_key else '❌ Missing'}")  
+        print(f"🔑 Serper API: {'✅ Configured' if serper_key else '⚠️ Optional'}")
+        
+        print("🔧 Testing rate limiter configuration...")
+        rate_limiter = RateLimiter()
+        print(f"✅ Rate limiter: {rate_limiter.base_delay}s delays, {rate_limiter.max_retries} retries")
+        
+        print("🔧 Testing crew creation...")
+        crew = Limco().crew()
+        print(f"✅ Crew created with {len(crew.agents)} agents")
+        
+        rate_limited_crew = create_rate_limited_crew(crew, aggressive_mode=False)
+        print("✅ Rate-limited crew wrapper created")
+        
+        print("🎉 All basic functionality tests passed!")
+        print("💡 Ready to run 'test-safe' for full testing")
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ Basic test failed: {e}")
+        print("🔧 Please check your configuration and API keys")
+        return False
+
+
 def test():
     """
     Test the crew with a simple goal to verify functionality.
@@ -200,11 +268,11 @@ def test():
         crew = Limco().crew()
         
         # Use aggressive mode for testing (faster but still rate limited)
-        aggressive_mode = _test_aggressive_mode
+        aggressive_mode = get_test_aggressive_mode()
         rate_limited_crew = create_rate_limited_crew(crew, aggressive_mode=aggressive_mode)
         
         mode_desc = "Aggressive (faster)" if aggressive_mode else "Conservative (safer)"  
-        delays = "1.5s delays, 4 retries" if aggressive_mode else "3s delays, 6 retries"
+        delays = "3s delays, 6 retries" if aggressive_mode else "5s delays, 8 retries"
         print(f"🛡️ Rate limiting enabled: Test mode ({delays})")
         if aggressive_mode:
             print("⚡ Using faster settings for testing")
@@ -217,9 +285,81 @@ def test():
         return result
         
     except Exception as e:
-        print(f"❌ Test failed: {e}")
-        print("💡 This is normal if you hit rate limits during testing")
-        print("   Try again in a few minutes or use 'run' with a real project")
+        error_msg = str(e).lower()
+        if any(term in error_msg for term in ['overloaded', 'rate limit', '429', '529', 'quota']):
+            print(f"⏰ API Rate Limit Hit: {e}")
+            print("💡 The AI service is overloaded or you've hit rate limits")
+            print("🔄 This is expected behavior - the rate limiter is working correctly")
+            print("✅ Solutions:")
+            print("   1. Wait 5-10 minutes and try again")
+            print("   2. Try 'test-safe' for more conservative rate limiting") 
+            print("   3. Consider upgrading to a premium API account for higher limits")
+        else:
+            print(f"❌ Test failed: {e}")
+            print("💡 This might be a configuration or network issue")
+        
+        print("🔧 Troubleshooting tips:")
+        print("   - Check your API keys are valid")
+        print("   - Verify internet connection")  
+        print("   - Review the full error above for specific details")
+        raise Exception(f"An error occurred while testing the crew: {e}")
+    """
+    Test the crew with a simple goal to verify functionality.
+    """
+    test_goal = """
+    Build a simple web application that displays a list of tasks 
+    with the ability to add, edit, and delete tasks. Use modern 
+    web technologies and ensure mobile responsiveness.
+    """
+    
+    print("🧪 Testing Limco crew with simple goal...")
+    
+    inputs = {
+        'ceo_goal': test_goal,
+        'current_year': str(datetime.now().year),
+        'company_name': 'Limco',
+        'ceo_name': 'LimbicNode42'
+    }
+    
+    try:
+        # Create standard crew
+        crew = Limco().crew()
+        
+        # Use aggressive mode for testing (faster but still rate limited)
+        aggressive_mode = get_test_aggressive_mode()
+        rate_limited_crew = create_rate_limited_crew(crew, aggressive_mode=aggressive_mode)
+        
+        mode_desc = "Aggressive (faster)" if aggressive_mode else "Conservative (safer)"  
+        delays = "3s delays, 6 retries" if aggressive_mode else "5s delays, 8 retries"
+        print(f"🛡️ Rate limiting enabled: Test mode ({delays})")
+        if aggressive_mode:
+            print("⚡ Using faster settings for testing")
+        else:
+            print("🐌 Using conservative settings for testing")
+        print("="*60)
+        
+        result = rate_limited_crew.kickoff(inputs)
+        print("✅ Test completed successfully!")
+        return result
+        
+    except Exception as e:
+        error_msg = str(e).lower()
+        if any(term in error_msg for term in ['overloaded', 'rate limit', '429', '529', 'quota']):
+            print(f"⏰ API Rate Limit Hit: {e}")
+            print("💡 The AI service is overloaded or you've hit rate limits")
+            print("🔄 This is expected behavior - the rate limiter is working correctly")
+            print("✅ Solutions:")
+            print("   1. Wait 5-10 minutes and try again")
+            print("   2. Try 'test-safe' for more conservative rate limiting") 
+            print("   3. Consider upgrading to a premium API account for higher limits")
+        else:
+            print(f"❌ Test failed: {e}")
+            print("💡 This might be a configuration or network issue")
+        
+        print("🔧 Troubleshooting tips:")
+        print("   - Check your API keys are valid")
+        print("   - Verify internet connection")  
+        print("   - Review the full error above for specific details")
         raise Exception(f"An error occurred while testing the crew: {e}")
 
 
@@ -249,11 +389,13 @@ if __name__ == "__main__":
             replay()
         elif command == "test":
             test()
+        elif command == "test-basic":
+            test_basic()
         elif command == "test-safe":
             # Test with conservative rate limiting
             print("🐌 Using conservative rate limiting for testing")
             # Temporarily modify test function behavior
-            _test_aggressive_mode = False
+            set_test_aggressive_mode(False)
             test()
         elif command == "run":
             # Remove command and use remaining as goal
@@ -274,21 +416,24 @@ Commands:
   run-fast [goal]         Execute with aggressive rate limiting (faster, for premium APIs)
   test                    Test with simple goal (aggressive rate limiting)
   test-safe               Test with conservative rate limiting (safer)
+  test-basic              Basic functionality test (imports, config, no API calls)
   train <iterations> <filename>  Train the crew with rate limiting
   replay <task_id>        Replay from specific task
   help                    Show this help message
 
 Rate Limiting Modes:
-  Conservative (default): 3s delays, 6 retries, safer for standard API accounts
-  Aggressive (fast):      1.5s delays, 4 retries, for premium API accounts
+  Conservative (default): 5s delays, 8 retries, safer for standard API accounts
+  Aggressive (fast):      3s delays, 6 retries, for premium API accounts
 
 Examples:
+  python -m limco.main test-basic          # Quick configuration check
+  python -m limco.main test-safe           # Safe full test
   python -m limco.main run "Build a CRM for small business"
   python -m limco.main run-fast "Create a mobile app"
-  python -m limco.main test
   python -m limco.main train 5 training_results.json
 
-For more information, see README.md and QUICKSTART.md
+Troubleshooting:
+  See docs/TROUBLESHOOTING_GUIDE.md for detailed help
             """)
         else:
             # Treat first argument as CEO goal

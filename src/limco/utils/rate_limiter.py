@@ -104,7 +104,7 @@ class RateLimiter:
                 # Check if it's a rate limit error
                 if any(phrase in error_msg for phrase in [
                     'rate limit', 'too many requests', '429', 
-                    'quota exceeded', 'rate_limit_error'
+                    'quota exceeded', 'rate_limit_error', 'overloaded', '529'
                 ]):
                     logger.warning(f"⚠️ Rate limit hit: {e}")
                     if attempt == self.max_retries:

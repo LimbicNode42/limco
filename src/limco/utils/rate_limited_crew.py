@@ -1,5 +1,11 @@
 """
-Rate-limited crew execution wrapper for Limco.
+Rate-limited crew executio        else:
+            # Default conservative settings for users with standard rate limits
+            configure_rate_limiter(
+                base_delay=5.0,      # Increased from 3.0
+                max_delay=300.0,     # Increased to 5 minutes
+                max_retries=8        # Increased from 6
+            )er for Limco.
 Provides intelligent rate limiting and retry logic for autonomous agent operations.
 """
 
@@ -77,15 +83,15 @@ class RateLimitedCrew:
         Returns:
             Crew execution result
         """
-        max_attempts = 3
+        max_attempts = 5  # Increased from 3 to handle rate limits better
         last_exception = None
         
         for attempt in range(max_attempts):
             try:
                 if attempt > 0:
                     logger.warning(f"🔄 Crew execution retry {attempt}/{max_attempts-1}")
-                    # Progressive delay between full crew retries
-                    delay = 30.0 * attempt  # 30s, 60s delays
+                    # Progressive delay between full crew retries (increased delays)
+                    delay = 60.0 * attempt  # 60s, 120s, 180s, 240s delays
                     logger.info(f"⏸️ Waiting {delay}s before retry...")
                     import time
                     time.sleep(delay)
@@ -100,7 +106,7 @@ class RateLimitedCrew:
                 # Check if it's a rate limit related error
                 if any(phrase in error_msg for phrase in [
                     'rate limit', 'too many requests', '429',
-                    'quota exceeded', 'rate_limit_error'
+                    'quota exceeded', 'rate_limit_error', 'overloaded', '529'
                 ]):
                     logger.warning(f"⚠️ Rate limit encountered in crew execution: {e}")
                     if attempt < max_attempts - 1:
@@ -174,17 +180,17 @@ def create_rate_limited_crew(crew: Crew,
     if aggressive_mode:
         # More aggressive settings for users with higher rate limits
         rate_config = {
-            'base_delay': 1.5,      # Faster base delay
-            'max_delay': 60.0,      # Shorter max delay
-            'max_retries': 4        # Fewer retries
+            'base_delay': 3.0,      # Increased from 1.5 for better stability
+            'max_delay': 120.0,     # Increased to 2 minutes
+            'max_retries': 6        # Increased from 4
         }
         logger.info("⚡ Using aggressive rate limiting (faster, for higher API limits)")
     else:
         # Conservative settings for users with standard rate limits
         rate_config = {
-            'base_delay': 3.0,      # Slower base delay
-            'max_delay': 180.0,     # Longer max delay
-            'max_retries': 6        # More retries
+            'base_delay': 5.0,      # Increased from 3.0
+            'max_delay': 300.0,     # Increased to 5 minutes
+            'max_retries': 8        # Increased from 6
         }
         logger.info("🐌 Using conservative rate limiting (safer for standard API limits)")
     
