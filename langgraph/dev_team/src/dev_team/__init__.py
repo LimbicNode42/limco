@@ -3,10 +3,9 @@
 This module defines a custom graph.
 """
 
-from dev_team import graph, goals, utils_state
+from dev_team import graph, states
 
 __all__ = [
   "graph", 
-  "goals", 
-  "utils_state"
+  "states"
 ]
