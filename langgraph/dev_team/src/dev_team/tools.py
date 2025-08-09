@@ -16,6 +16,8 @@ import subprocess
 import states
 from langchain_community.utilities import GoogleSerperAPIWrapper
 from langchain_tavily import TavilySearch
+from langchain_community.agent_toolkits.github.toolkit import GitHubToolkit
+from langchain_community.utilities.github import GitHubAPIWrapper
 
 
 def safe_get_state_attr(state: states.State, key: str, default=None):
@@ -665,33 +667,685 @@ def run_tests(test_path: str = "tests/", test_type: str = "unit") -> str:
     return f"Running {test_type} tests from {test_path}:\n✅ 15 passed\n❌ 2 failed\n⚠️ 1 skipped"
 
 
-@tool
-def git_status() -> str:
-    """Get current git repository status.
-    
-    Returns:
-        Git status information
-    """
-    try:
-        result = subprocess.run(['git', 'status', '--porcelain'], 
-                              capture_output=True, text=True)
-        return f"Git status:\n{result.stdout}"
-    except Exception as e:
-        return f"Error getting git status: {str(e)}"
+# =============================================================================
+# GITHUB INTEGRATION TOOLS
+# =============================================================================
 
-
-@tool
-def git_commit(message: str, files: List[str] = None) -> str:
-    """Commit changes to git repository.
+def _get_github_toolkit(repository: str = None) -> GitHubToolkit:
+    """Get GitHub toolkit instance with optional repository override.
     
     Args:
-        message: Commit message
-        files: Specific files to commit (if None, commits all staged)
+        repository: Repository name in format 'owner/repo'. If None, uses environment default.
         
     Returns:
-        Commit confirmation
+        Configured GitHubToolkit instance
     """
-    return f"Git commit created: {message} (Files: {files or 'all staged'})"
+    try:
+        # Create GitHub API wrapper with optional repository override
+        if repository:
+            # Temporarily override the repository environment variable
+            import os
+            original_repo = os.environ.get("GITHUB_REPOSITORY")
+            os.environ["GITHUB_REPOSITORY"] = repository
+            try:
+                github = GitHubAPIWrapper()
+                toolkit = GitHubToolkit.from_github_api_wrapper(github, include_release_tools=True)
+            finally:
+                # Restore original repository setting
+                if original_repo:
+                    os.environ["GITHUB_REPOSITORY"] = original_repo
+                else:
+                    os.environ.pop("GITHUB_REPOSITORY", None)
+        else:
+            # Use default repository from environment
+            github = GitHubAPIWrapper()
+            toolkit = GitHubToolkit.from_github_api_wrapper(github, include_release_tools=True)
+            
+        return toolkit
+    except Exception as e:
+        print(f"Failed to initialize GitHub toolkit: {e}")
+        return None
+
+
+@tool
+def github_get_issues(repository: str = None, state: str = "open", limit: int = 10) -> str:
+    """Get issues from a GitHub repository.
+    
+    Args:
+        repository: Repository name in format 'owner/repo' (default: from environment)
+        state: Issue state - 'open', 'closed', or 'all' (default: 'open')
+        limit: Maximum number of issues to return (default: 10)
+        
+    Returns:
+        List of issues with details
+    """
+    try:
+        toolkit = _get_github_toolkit(repository)
+        if not toolkit:
+            return "❌ Failed to initialize GitHub connection"
+            
+        # Get the issues tool
+        tools = toolkit.get_tools()
+        issues_tool = next((tool for tool in tools if tool.name == "Get Issues"), None)
+        if not issues_tool:
+            issues_tool = next((tool for tool in tools if "Get Issues" in tool.name), None)
+        
+        if not issues_tool:
+            return "❌ Issues tool not found"
+            
+        # Execute the tool
+        result = issues_tool.invoke({})
+        
+        return f"📋 **GitHub Issues** (Repository: {repository or 'default'})\n\n{result}"
+        
+    except Exception as e:
+        return f"❌ Error fetching GitHub issues: {str(e)}"
+
+
+@tool  
+def github_get_issue(issue_number: int, repository: str = None) -> str:
+    """Get details about a specific GitHub issue.
+    
+    Args:
+        issue_number: The issue number to retrieve
+        repository: Repository name in format 'owner/repo' (default: from environment)
+        
+    Returns:
+        Detailed issue information
+    """
+    try:
+        toolkit = _get_github_toolkit(repository)
+        if not toolkit:
+            return "❌ Failed to initialize GitHub connection"
+            
+        # Get the issue tool
+        tools = toolkit.get_tools()
+        issue_tool = next((tool for tool in tools if tool.name == "Get Issue"), None)
+        if not issue_tool:
+            issue_tool = next((tool for tool in tools if "Get Issue" in tool.name), None)
+        
+        if not issue_tool:
+            return "❌ Issue tool not found"
+            
+        # Execute the tool
+        result = issue_tool.invoke({"issue_number": issue_number})
+        
+        return f"🔍 **GitHub Issue #{issue_number}** (Repository: {repository or 'default'})\n\n{result}"
+        
+    except Exception as e:
+        return f"❌ Error fetching GitHub issue #{issue_number}: {str(e)}"
+
+
+@tool
+def github_comment_on_issue(issue_number: int, comment: str, repository: str = None) -> str:
+    """Add a comment to a GitHub issue.
+    
+    Args:
+        issue_number: The issue number to comment on
+        comment: The comment text to add
+        repository: Repository name in format 'owner/repo' (default: from environment)
+        
+    Returns:
+        Confirmation of comment posted
+    """
+    try:
+        toolkit = _get_github_toolkit(repository)
+        if not toolkit:
+            return "❌ Failed to initialize GitHub connection"
+            
+        # Get the comment tool
+        tools = toolkit.get_tools()
+        comment_tool = next((tool for tool in tools if "Comment on Issue" in tool.name), None)
+        
+        if not comment_tool:
+            return "❌ Comment tool not found"
+            
+        # Execute the tool
+        result = comment_tool.invoke({
+            "issue_number": issue_number,
+            "comment": comment
+        })
+        
+        return f"💬 **Comment Posted** on Issue #{issue_number} (Repository: {repository or 'default'})\n\n{result}"
+        
+    except Exception as e:
+        return f"❌ Error commenting on GitHub issue #{issue_number}: {str(e)}"
+
+
+@tool
+def github_list_pull_requests(repository: str = None, state: str = "open") -> str:
+    """List pull requests in a GitHub repository.
+    
+    Args:
+        repository: Repository name in format 'owner/repo' (default: from environment)
+        state: PR state - 'open', 'closed', or 'all' (default: 'open')
+        
+    Returns:
+        List of pull requests with details
+    """
+    try:
+        toolkit = _get_github_toolkit(repository)
+        if not toolkit:
+            return "❌ Failed to initialize GitHub connection"
+            
+        # Get the PR list tool
+        tools = toolkit.get_tools()
+        pr_tool = next((tool for tool in tools if "List open pull requests" in tool.name), None)
+        
+        if not pr_tool:
+            return "❌ Pull requests tool not found"
+            
+        # Execute the tool
+        result = pr_tool.invoke({})
+        
+        return f"🔄 **GitHub Pull Requests** (Repository: {repository or 'default'})\n\n{result}"
+        
+    except Exception as e:
+        return f"❌ Error listing GitHub pull requests: {str(e)}"
+
+
+@tool
+def github_get_pull_request(pr_number: int, repository: str = None) -> str:
+    """Get details about a specific GitHub pull request.
+    
+    Args:
+        pr_number: The pull request number to retrieve
+        repository: Repository name in format 'owner/repo' (default: from environment)
+        
+    Returns:
+        Detailed pull request information
+    """
+    try:
+        toolkit = _get_github_toolkit(repository)
+        if not toolkit:
+            return "❌ Failed to initialize GitHub connection"
+            
+        # Get the PR tool
+        tools = toolkit.get_tools()
+        pr_tool = next((tool for tool in tools if "Get Pull Request" in tool.name), None)
+        
+        if not pr_tool:
+            return "❌ Pull request tool not found"
+            
+        # Execute the tool
+        result = pr_tool.invoke({"pr_number": pr_number})
+        
+        return f"🔄 **GitHub Pull Request #{pr_number}** (Repository: {repository or 'default'})\n\n{result}"
+        
+    except Exception as e:
+        return f"❌ Error fetching GitHub pull request #{pr_number}: {str(e)}"
+
+
+@tool
+def github_create_pull_request(title: str, body: str, head_branch: str = None, base_branch: str = None, repository: str = None) -> str:
+    """Create a new GitHub pull request.
+    
+    Args:
+        title: The title of the pull request
+        body: The body/description of the pull request
+        head_branch: The branch containing changes (default: from environment)
+        base_branch: The target branch for merging (default: from environment)
+        repository: Repository name in format 'owner/repo' (default: from environment)
+        
+    Returns:
+        Details of the created pull request
+    """
+    try:
+        toolkit = _get_github_toolkit(repository)
+        if not toolkit:
+            return "❌ Failed to initialize GitHub connection"
+            
+        # Get the create PR tool
+        tools = toolkit.get_tools()
+        create_pr_tool = next((tool for tool in tools if "Create Pull Request" in tool.name), None)
+        
+        if not create_pr_tool:
+            return "❌ Create pull request tool not found"
+            
+        # Prepare PR data
+        pr_data = {"title": title, "body": body}
+        if head_branch:
+            pr_data["head"] = head_branch
+        if base_branch:
+            pr_data["base"] = base_branch
+            
+        # Execute the tool
+        result = create_pr_tool.invoke(pr_data)
+        
+        return f"✨ **GitHub Pull Request Created** (Repository: {repository or 'default'})\n\n{result}"
+        
+    except Exception as e:
+        return f"❌ Error creating GitHub pull request: {str(e)}"
+
+
+@tool
+def github_create_file(file_path: str, content: str, commit_message: str, repository: str = None, branch: str = None) -> str:
+    """Create a new file in a GitHub repository.
+    
+    Args:
+        file_path: Path where the file should be created
+        content: Content of the file
+        commit_message: Commit message for the file creation
+        repository: Repository name in format 'owner/repo' (default: from environment)
+        branch: Branch to create the file on (default: from environment)
+        
+    Returns:
+        Confirmation of file creation
+    """
+    try:
+        toolkit = _get_github_toolkit(repository)
+        if not toolkit:
+            return "❌ Failed to initialize GitHub connection"
+            
+        # Get the create file tool
+        tools = toolkit.get_tools()
+        create_file_tool = next((tool for tool in tools if "Create File" in tool.name), None)
+        
+        if not create_file_tool:
+            return "❌ Create file tool not found"
+            
+        # Execute the tool
+        result = create_file_tool.invoke({
+            "file_path": file_path,
+            "file_contents": content,
+            "commit_message": commit_message
+        })
+        
+        return f"📄 **GitHub File Created** (Repository: {repository or 'default'})\nPath: {file_path}\n\n{result}"
+        
+    except Exception as e:
+        return f"❌ Error creating GitHub file '{file_path}': {str(e)}"
+
+
+@tool
+def github_read_file(file_path: str, repository: str = None, branch: str = None) -> str:
+    """Read a file from a GitHub repository.
+    
+    Args:
+        file_path: Path to the file to read
+        repository: Repository name in format 'owner/repo' (default: from environment)
+        branch: Branch to read from (default: from environment)
+        
+    Returns:
+        File contents
+    """
+    try:
+        toolkit = _get_github_toolkit(repository)
+        if not toolkit:
+            return "❌ Failed to initialize GitHub connection"
+            
+        # Get the read file tool
+        tools = toolkit.get_tools()
+        read_file_tool = next((tool for tool in tools if "Read File" in tool.name), None)
+        
+        if not read_file_tool:
+            return "❌ Read file tool not found"
+            
+        # Execute the tool
+        result = read_file_tool.invoke({"file_path": file_path})
+        
+        return f"📖 **GitHub File Content** (Repository: {repository or 'default'})\nPath: {file_path}\n\n{result}"
+        
+    except Exception as e:
+        return f"❌ Error reading GitHub file '{file_path}': {str(e)}"
+
+
+@tool
+def github_update_file(file_path: str, content: str, commit_message: str, repository: str = None, branch: str = None) -> str:
+    """Update an existing file in a GitHub repository.
+    
+    Args:
+        file_path: Path to the file to update
+        content: New content for the file
+        commit_message: Commit message for the update
+        repository: Repository name in format 'owner/repo' (default: from environment)
+        branch: Branch to update the file on (default: from environment)
+        
+    Returns:
+        Confirmation of file update
+    """
+    try:
+        toolkit = _get_github_toolkit(repository)
+        if not toolkit:
+            return "❌ Failed to initialize GitHub connection"
+            
+        # Get the update file tool
+        tools = toolkit.get_tools()
+        update_file_tool = next((tool for tool in tools if "Update File" in tool.name), None)
+        
+        if not update_file_tool:
+            return "❌ Update file tool not found"
+            
+        # Execute the tool
+        result = update_file_tool.invoke({
+            "file_path": file_path,
+            "file_contents": content,
+            "commit_message": commit_message
+        })
+        
+        return f"✏️ **GitHub File Updated** (Repository: {repository or 'default'})\nPath: {file_path}\n\n{result}"
+        
+    except Exception as e:
+        return f"❌ Error updating GitHub file '{file_path}': {str(e)}"
+
+
+@tool
+def github_delete_file(file_path: str, commit_message: str, repository: str = None, branch: str = None) -> str:
+    """Delete a file from a GitHub repository.
+    
+    Args:
+        file_path: Path to the file to delete
+        commit_message: Commit message for the deletion
+        repository: Repository name in format 'owner/repo' (default: from environment)
+        branch: Branch to delete the file from (default: from environment)
+        
+    Returns:
+        Confirmation of file deletion
+    """
+    try:
+        toolkit = _get_github_toolkit(repository)
+        if not toolkit:
+            return "❌ Failed to initialize GitHub connection"
+            
+        # Get the delete file tool
+        tools = toolkit.get_tools()
+        delete_file_tool = next((tool for tool in tools if "Delete File" in tool.name), None)
+        
+        if not delete_file_tool:
+            return "❌ Delete file tool not found"
+            
+        # Execute the tool
+        result = delete_file_tool.invoke({
+            "file_path": file_path,
+            "commit_message": commit_message
+        })
+        
+        return f"🗑️ **GitHub File Deleted** (Repository: {repository or 'default'})\nPath: {file_path}\n\n{result}"
+        
+    except Exception as e:
+        return f"❌ Error deleting GitHub file '{file_path}': {str(e)}"
+
+
+@tool
+def github_list_branches(repository: str = None) -> str:
+    """List all branches in a GitHub repository.
+    
+    Args:
+        repository: Repository name in format 'owner/repo' (default: from environment)
+        
+    Returns:
+        List of repository branches
+    """
+    try:
+        toolkit = _get_github_toolkit(repository)
+        if not toolkit:
+            return "❌ Failed to initialize GitHub connection"
+            
+        # Get the list branches tool
+        tools = toolkit.get_tools()
+        branches_tool = next((tool for tool in tools if "List branches" in tool.name), None)
+        
+        if not branches_tool:
+            return "❌ List branches tool not found"
+            
+        # Execute the tool
+        result = branches_tool.invoke({})
+        
+        return f"🌿 **GitHub Branches** (Repository: {repository or 'default'})\n\n{result}"
+        
+    except Exception as e:
+        return f"❌ Error listing GitHub branches: {str(e)}"
+
+
+@tool
+def github_create_branch(branch_name: str, source_branch: str = None, repository: str = None) -> str:
+    """Create a new branch in a GitHub repository.
+    
+    Args:
+        branch_name: Name of the new branch to create
+        source_branch: Branch to create from (default: repository default branch)
+        repository: Repository name in format 'owner/repo' (default: from environment)
+        
+    Returns:
+        Confirmation of branch creation
+    """
+    try:
+        toolkit = _get_github_toolkit(repository)
+        if not toolkit:
+            return "❌ Failed to initialize GitHub connection"
+            
+        # Get the create branch tool
+        tools = toolkit.get_tools()
+        create_branch_tool = next((tool for tool in tools if "Create a new branch" in tool.name), None)
+        
+        if not create_branch_tool:
+            return "❌ Create branch tool not found"
+            
+        # Execute the tool
+        result = create_branch_tool.invoke({"branch_name": branch_name})
+        
+        return f"🌱 **GitHub Branch Created** (Repository: {repository or 'default'})\nBranch: {branch_name}\n\n{result}"
+        
+    except Exception as e:
+        return f"❌ Error creating GitHub branch '{branch_name}': {str(e)}"
+
+
+@tool
+def github_set_active_branch(branch_name: str, repository: str = None) -> str:
+    """Set the active branch for GitHub operations.
+    
+    Args:
+        branch_name: Name of the branch to set as active
+        repository: Repository name in format 'owner/repo' (default: from environment)
+        
+    Returns:
+        Confirmation of active branch change
+    """
+    try:
+        toolkit = _get_github_toolkit(repository)
+        if not toolkit:
+            return "❌ Failed to initialize GitHub connection"
+            
+        # Get the set active branch tool
+        tools = toolkit.get_tools()
+        set_branch_tool = next((tool for tool in tools if "Set active branch" in tool.name), None)
+        
+        if not set_branch_tool:
+            return "❌ Set active branch tool not found"
+            
+        # Execute the tool
+        result = set_branch_tool.invoke({"branch_name": branch_name})
+        
+        return f"🎯 **GitHub Active Branch Set** (Repository: {repository or 'default'})\nActive Branch: {branch_name}\n\n{result}"
+        
+    except Exception as e:
+        return f"❌ Error setting GitHub active branch '{branch_name}': {str(e)}"
+
+
+@tool
+def github_search_code(query: str, repository: str = None, language: str = None) -> str:
+    """Search for code in a GitHub repository.
+    
+    Args:
+        query: Search query for code
+        repository: Repository name in format 'owner/repo' (default: from environment)
+        language: Programming language filter (optional)
+        
+    Returns:
+        Code search results
+    """
+    try:
+        toolkit = _get_github_toolkit(repository)
+        if not toolkit:
+            return "❌ Failed to initialize GitHub connection"
+            
+        # Get the search code tool
+        tools = toolkit.get_tools()
+        search_tool = next((tool for tool in tools if "Search code" in tool.name), None)
+        
+        if not search_tool:
+            return "❌ Search code tool not found"
+            
+        # Build search query
+        search_query = query
+        if language:
+            search_query = f"{query} language:{language}"
+            
+        # Execute the tool
+        result = search_tool.invoke({"query": search_query})
+        
+        return f"🔍 **GitHub Code Search** (Repository: {repository or 'default'})\nQuery: {query}\n\n{result}"
+        
+    except Exception as e:
+        return f"❌ Error searching GitHub code: {str(e)}"
+
+
+@tool
+def github_search_issues(query: str, repository: str = None, state: str = None) -> str:
+    """Search for issues and pull requests in a GitHub repository.
+    
+    Args:
+        query: Search query for issues and PRs
+        repository: Repository name in format 'owner/repo' (default: from environment)
+        state: Issue state filter - 'open', 'closed' (optional)
+        
+    Returns:
+        Issues and PR search results
+    """
+    try:
+        toolkit = _get_github_toolkit(repository)
+        if not toolkit:
+            return "❌ Failed to initialize GitHub connection"
+            
+        # Get the search issues tool
+        tools = toolkit.get_tools()
+        search_tool = next((tool for tool in tools if "Search issues" in tool.name), None)
+        
+        if not search_tool:
+            return "❌ Search issues tool not found"
+            
+        # Build search query
+        search_query = query
+        if state:
+            search_query = f"{query} state:{state}"
+            
+        # Execute the tool
+        result = search_tool.invoke({"query": search_query})
+        
+        return f"🔍 **GitHub Issues Search** (Repository: {repository or 'default'})\nQuery: {query}\n\n{result}"
+        
+    except Exception as e:
+        return f"❌ Error searching GitHub issues: {str(e)}"
+
+
+@tool
+def github_get_directory_contents(directory_path: str = "", repository: str = None, branch: str = None) -> str:
+    """Get contents of a directory in a GitHub repository.
+    
+    Args:
+        directory_path: Path to the directory (empty string for root)
+        repository: Repository name in format 'owner/repo' (default: from environment)
+        branch: Branch to read from (default: from environment)
+        
+    Returns:
+        Directory contents listing
+    """
+    try:
+        toolkit = _get_github_toolkit(repository)
+        if not toolkit:
+            return "❌ Failed to initialize GitHub connection"
+            
+        # Get the directory tool
+        tools = toolkit.get_tools()
+        dir_tool = next((tool for tool in tools if "Get files from a directory" in tool.name), None)
+        
+        if not dir_tool:
+            return "❌ Directory tool not found"
+            
+        # Execute the tool
+        result = dir_tool.invoke({"directory_path": directory_path})
+        
+        return f"📁 **GitHub Directory Contents** (Repository: {repository or 'default'})\nPath: {directory_path or 'root'}\n\n{result}"
+        
+    except Exception as e:
+        return f"❌ Error getting GitHub directory contents: {str(e)}"
+
+
+@tool
+def github_get_latest_release(repository: str = None) -> str:
+    """Get the latest release from a GitHub repository.
+    
+    Args:
+        repository: Repository name in format 'owner/repo' (default: from environment)
+        
+    Returns:
+        Latest release information
+    """
+    try:
+        toolkit = _get_github_toolkit(repository)
+        if not toolkit:
+            return "❌ Failed to initialize GitHub connection"
+            
+        # Get the latest release tool
+        tools = toolkit.get_tools()
+        release_tool = next((tool for tool in tools if "Get Latest Release" in tool.name), None)
+        
+        if not release_tool:
+            return "❌ Latest release tool not found"
+            
+        # Execute the tool
+        result = release_tool.invoke({})
+        
+        return f"🚀 **GitHub Latest Release** (Repository: {repository or 'default'})\n\n{result}"
+        
+    except Exception as e:
+        return f"❌ Error getting GitHub latest release: {str(e)}"
+
+
+@tool
+def github_create_repository(name: str, description: str = "", private: bool = False, owner: str = "LimbicNode42") -> str:
+    """Create a new GitHub repository.
+    
+    Args:
+        name: Repository name
+        description: Repository description (optional)
+        private: Whether the repository should be private (default: False)
+        owner: Repository owner (default: LimbicNode42)
+        
+    Returns:
+        Details of the created repository
+    """
+    try:
+        import os
+        from github import Github
+        
+        # Initialize GitHub API client
+        token = os.environ.get("GITHUB_APP_PRIVATE_KEY")
+        app_id = os.environ.get("GITHUB_APP_ID")
+        
+        if not token or not app_id:
+            return "❌ GitHub authentication not configured"
+        
+        # Create repository using PyGitHub directly since GitHubToolkit doesn't include repo creation
+        g = Github(token)
+        user = g.get_user(owner)
+        
+        repo = user.create_repo(
+            name=name,
+            description=description,
+            private=private,
+            auto_init=True  # Initialize with README
+        )
+        
+        return f"✨ **GitHub Repository Created**\n" \
+               f"Name: {repo.full_name}\n" \
+               f"Description: {description}\n" \
+               f"Private: {private}\n" \
+               f"URL: {repo.html_url}\n" \
+               f"Clone URL: {repo.clone_url}"
+        
+    except Exception as e:
+        return f"❌ Error creating GitHub repository '{name}': {str(e)}"
 
 
 # =============================================================================
@@ -809,7 +1463,15 @@ def get_all_tools() -> List:
         read_file, write_file, list_files,
         
         # Code Development
-        run_code, run_tests, git_status, git_commit,
+        run_code, run_tests,
+        
+        # GitHub Integration
+        github_get_issues, github_get_issue, github_comment_on_issue,
+        github_list_pull_requests, github_get_pull_request, github_create_pull_request,
+        github_create_file, github_read_file, github_update_file, github_delete_file,
+        github_list_branches, github_create_branch, github_set_active_branch,
+        github_search_code, github_search_issues, github_get_directory_contents,
+        github_get_latest_release, github_create_repository,
         
         # Project Management
         create_task, update_task_status, get_team_workload,
