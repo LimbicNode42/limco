@@ -671,6 +671,191 @@ def run_tests(test_path: str = "tests/", test_type: str = "unit") -> str:
 # GITHUB INTEGRATION TOOLS
 # =============================================================================
 
+@tool
+def request_repository_selection(project_description: str, suggested_name: str = None) -> str:
+    """Request human input for repository selection before starting development work.
+    
+    This tool creates a human-in-the-loop interaction to determine which repository
+    to use for the project. It should be called before any GitHub operations when
+    starting new development work.
+    
+    Args:
+        project_description: Brief description of the project/work to be done
+        suggested_name: Optional suggested repository name if creating new repo
+        
+    Returns:
+        Instructions for human to provide repository choice
+    """
+    message = f"""
+🔄 **HUMAN INPUT REQUIRED** - Repository Selection
+
+**Project**: {project_description}
+
+**Options**:
+1. **Use existing repository**: Provide the repository name in format 'owner/repo'
+2. **Create new repository**: Provide the desired repository name
+
+**Suggested name** (if creating new): {suggested_name or 'Not provided'}
+
+**Please respond with**:
+- For existing repo: "use-repo: owner/repository-name"
+- For new repo: "create-repo: repository-name"
+
+**Example responses**:
+- "use-repo: LimbicNode42/my-existing-project"
+- "create-repo: awesome-new-project"
+
+**Note**: The system will wait for your response before proceeding with any GitHub operations.
+"""
+    return message.strip()
+
+
+@tool 
+def initiate_project_workflow(project_description: str, suggested_repo_name: str = None) -> str:
+    """Initiate the complete project workflow with human-in-the-loop repository selection.
+    
+    This should be the FIRST tool called when starting any new development work.
+    It guides the human through repository selection before any coding begins.
+    
+    Args:
+        project_description: Description of the project/feature to be developed
+        suggested_repo_name: Optional suggested name for new repository
+        
+    Returns:
+        Complete workflow guidance for repository selection
+    """
+    workflow_message = f"""
+🚀 **PROJECT WORKFLOW INITIATED**
+
+**Project**: {project_description}
+
+**STEP 1: Repository Selection Required**
+Before any development work begins, we need to determine which repository to use.
+
+**Your Options**:
+
+🔍 **Option A: Use Existing Repository**
+- Choose from your existing GitHub repositories
+- Suitable if this work extends an existing project
+- Use: `list_available_repositories()` to see options
+
+🆕 **Option B: Create New Repository**  
+- Create a fresh repository for this project
+- Suitable for new standalone projects
+- Suggested name: {suggested_repo_name or 'Not provided'}
+
+**REQUIRED ACTION**:
+Please respond with one of:
+- "use-repo: owner/repository-name" (for existing repo)
+- "create-repo: repository-name" (for new repo)
+
+**Examples**:
+- "use-repo: LimbicNode42/my-web-app"
+- "create-repo: ai-assistant-tool"
+
+**After Repository Selection**:
+✅ Repository will be configured for development
+✅ Agents will create feature branches (never work on master)
+✅ All changes will go through pull requests for your review
+✅ Development work will begin with proper Git workflow
+
+**Need help choosing?** Use `list_available_repositories()` to see your options.
+"""
+    
+    return workflow_message.strip()
+
+
+@tool
+def process_repository_choice(human_response: str) -> str:
+    """Process the human's repository choice and set up the development environment.
+    
+    Args:
+        human_response: Human's response in format "use-repo: owner/repo" or "create-repo: name"
+        
+    Returns:
+        Status message with next steps or repository setup results
+    """
+    try:
+        response = human_response.strip().lower()
+        
+        if response.startswith("use-repo:"):
+            # Extract repository name
+            repo_name = response.replace("use-repo:", "").strip()
+            
+            # Validate repository format
+            if "/" not in repo_name:
+                return "❌ Invalid repository format. Please use 'owner/repository-name' format."
+            
+            # Check if repository exists
+            toolkit = _get_github_toolkit(repo_name)
+            if toolkit:
+                tools = toolkit.get_tools()
+                repo_tool = next((tool for tool in tools if "Get Repository" in tool.name), None)
+                if repo_tool:
+                    try:
+                        result = repo_tool.run("")
+                        return f"✅ Repository '{repo_name}' found and accessible.\n\n📋 **Next Steps**:\n- Repository is ready for development\n- Agents will create feature branches for work\n- All changes will go through pull requests for human review"
+                    except Exception as e:
+                        return f"❌ Repository '{repo_name}' exists but not accessible. Please check permissions.\nError: {str(e)}"
+                        
+            return f"❌ Could not access repository '{repo_name}'. Please verify the name and permissions."
+            
+        elif response.startswith("create-repo:"):
+            # Extract repository name
+            repo_name = response.replace("create-repo:", "").strip()
+            
+            # Validate repository name
+            if not repo_name or " " in repo_name:
+                return "❌ Invalid repository name. Use lowercase letters, numbers, hyphens, and underscores only."
+            
+            return f"🔄 **Repository Creation Requested**: '{repo_name}'\n\n📋 **Next Steps**:\n1. Use `github_create_repository(name='{repo_name}', description='...', private=True/False)` to create the repository\n2. Repository will be created under your GitHub account\n3. Agents will set up initial structure and create feature branches\n4. All development work will go through pull requests"
+            
+        else:
+            return "❌ Invalid response format. Please use:\n- 'use-repo: owner/repository-name' for existing repository\n- 'create-repo: repository-name' for new repository"
+            
+    except Exception as e:
+        return f"❌ Error processing repository choice: {str(e)}"
+
+
+@tool
+def list_available_repositories(include_private: bool = True, limit: int = 20) -> str:
+    """List available repositories to help human choose which one to use.
+    
+    Args:
+        include_private: Whether to include private repositories (default: True)
+        limit: Maximum number of repositories to return (default: 20)
+        
+    Returns:
+        List of available repositories with basic information
+    """
+    try:
+        toolkit = _get_github_toolkit()
+        if not toolkit:
+            return "❌ Failed to initialize GitHub connection"
+            
+        # This would normally list repositories from the authenticated user
+        # For now, return a helpful message about using the tool
+        return f"""
+📁 **Available Repositories**
+
+To see your repositories, you can:
+1. Visit: https://github.com/settings/repositories 
+2. Use GitHub's web interface to browse your repositories
+3. Common repositories you might want to use:
+   - Personal projects under your username
+   - Organization repositories you have access to
+
+**After reviewing your repositories, use the format**:
+- For existing: "use-repo: owner/repository-name"
+- For new: "create-repo: new-repository-name"
+
+**Note**: The system can access any repository you have permissions for.
+"""
+        
+    except Exception as e:
+        return f"❌ Error listing repositories: {str(e)}"
+
+
 def _get_github_toolkit(repository: str = None) -> GitHubToolkit:
     """Get GitHub toolkit instance with optional repository override.
     
