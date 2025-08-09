@@ -11,9 +11,16 @@ from typing import Literal
 import states
 
 
+def safe_get_state_attr(state: states.State, key: str, default=None):
+    """Safely get state attribute whether state is dict-like or object-like."""
+    if hasattr(state, 'get'):
+        return safe_get_state_attr(state, key, default)
+    return getattr(state, key, default)
+
+
 def should_continue_with_managers(state: states.State) -> Literal["engineering_manager", "execution", "cto", "review"]:
     """Route to manager delegation, next iteration, or review phase."""
-    iteration_state = state.get("iteration_state", states.IterationState())
+    iteration_state = safe_get_state_attr(state, "iteration_state", states.IterationState())
     
     # Standard delegation flow
     if state.current_phase == "delegation" and state.active_managers:
@@ -38,11 +45,11 @@ def should_continue_with_managers(state: states.State) -> Literal["engineering_m
 
 def should_continue_with_engineers(state: states.State) -> Literal["senior_engineer", "senior_engineer_aggregator", "qa_engineer", "evaluation", "capability_gap_analyzer", "human_assistance_coordinator", "cto", "review"]:
     """Route to appropriate engineer type, aggregator, evaluation phase, capability analysis, human assistance, next iteration, or review phase."""
-    iteration_state = state.get("iteration_state", states.IterationState())
+    iteration_state = safe_get_state_attr(state, "iteration_state", states.IterationState())
     
     # Check for pending human assistance requests
-    if state.get("pending_human_intervention", False):
-        pending_requests = [req for req in state.get("human_assistance_requests", []) if req.status == "pending"]
+    if safe_get_state_attr(state, "pending_human_intervention", False):
+        pending_requests = [req for req in safe_get_state_attr(state, "human_assistance_requests", []) if req.status == "pending"]
         if pending_requests:
             return "human_assistance_coordinator"
     
@@ -109,7 +116,7 @@ def should_continue_with_evaluation(state: states.State) -> Literal["unit_test_e
     # Check if there are any items in evaluation queue
     if not state.evaluation_queue:
         # Check for failed work that might need capability gap analysis
-        failed_work = [w for w in state.get("failed_work", []) if 
+        failed_work = [w for w in safe_get_state_attr(state, "failed_work", []) if 
                       w.result and any(keyword in w.result.lower() for keyword in 
                                      ["error", "failed", "unauthorized", "access denied"])]
         if failed_work:
@@ -147,7 +154,7 @@ def should_route_from_human_assistance(state: states.State) -> Literal["executio
     """Route from human assistance phase back to appropriate workflow stage."""
     
     # Check if there are still pending requests
-    pending_requests = [req for req in state.get("human_assistance_requests", []) if req.status == "pending"]
+    pending_requests = [req for req in safe_get_state_attr(state, "human_assistance_requests", []) if req.status == "pending"]
     if pending_requests:
         return "capability_gap_analyzer"  # Continue analyzing capability gaps
     

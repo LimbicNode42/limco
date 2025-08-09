@@ -13,6 +13,14 @@ import requests
 import os
 import json
 import subprocess
+import states
+
+
+def safe_get_state_attr(state: states.State, key: str, default=None):
+    """Safely get state attribute whether state is dict-like or object-like."""
+    if hasattr(state, 'get'):
+        return safe_get_state_attr(state, key, default)
+    return getattr(state, key, default)
 from datetime import datetime
 
 
@@ -39,7 +47,7 @@ def transfer_to_qa_engineer(
     return Command(
         goto="qa_engineer",
         update={
-            "messages": state.get("messages", []) + [tool_message],
+            "messages": safe_get_state_attr(state, "messages", []) + [tool_message],
             "handoff_reason": reason,
             "handoff_context": context,
             "priority": priority,
@@ -67,7 +75,7 @@ def escalate_to_cto(
     return Command(
         goto="cto",
         update={
-            "messages": state.get("messages", []) + [tool_message],
+            "messages": safe_get_state_attr(state, "messages", []) + [tool_message],
             "escalation_issue": issue,
             "escalation_urgency": urgency,
             "requires_cto_decision": True,
@@ -95,7 +103,7 @@ def request_peer_review(
     return Command(
         goto="peer_review_evaluator",
         update={
-            "messages": state.get("messages", []) + [tool_message],
+            "messages": safe_get_state_attr(state, "messages", []) + [tool_message],
             "review_work": work_description,
             "review_focus": review_focus,
             "review_type": "peer_review",
@@ -123,7 +131,7 @@ def delegate_to_engineering_manager(
     return Command(
         goto="engineering_manager",
         update={
-            "messages": state.get("messages", []) + [tool_message],
+            "messages": safe_get_state_attr(state, "messages", []) + [tool_message],
             "delegated_tasks": task_breakdown,
             "requires_coordination": coordination_needed,
             "current_agent": "engineering_manager"
@@ -150,7 +158,7 @@ def transfer_to_senior_engineer(
     return Command(
         goto="senior_engineer",
         update={
-            "messages": state.get("messages", []) + [tool_message],
+            "messages": safe_get_state_attr(state, "messages", []) + [tool_message],
             "assigned_task": task_description,
             "technical_requirements": technical_requirements,
             "current_agent": "senior_engineer"
@@ -177,7 +185,7 @@ def escalate_to_human(
     return Command(
         goto="human_escalation_evaluator",
         update={
-            "messages": state.get("messages", []) + [tool_message],
+            "messages": safe_get_state_attr(state, "messages", []) + [tool_message],
             "human_decision_needed": decision_needed,
             "decision_context": background_context,
             "requires_human_input": True,

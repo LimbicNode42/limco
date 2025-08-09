@@ -16,6 +16,13 @@ from models import get_model_for_agent
 from tools import get_all_tools
 
 
+def safe_get_state_attr(state: states.State, key: str, default=None):
+    """Safely get state attribute whether state is dict-like or object-like."""
+    if hasattr(state, 'get'):
+        return state.get(key, default)
+    return getattr(state, key, default)
+
+
 async def llm_human_goal_setting(state: states.State, config: RunnableConfig) -> Dict[str, Any]:
     """LLM-powered human goal setting with structured project planning."""
     print("🚀 LLM Human Goal Setting Stage")
@@ -75,10 +82,11 @@ async def llm_cto(state: states.State, config: RunnableConfig) -> Dict[str, Any]
     # Import complexity analyzer
     from complexity_analyzer import assess_project_complexity, create_iteration_manager
     
-    project_goals = state.get("project_goals", "No goals specified")
+    project_goals = safe_get_state_attr(state, "project_goals", "No goals specified")
     existing_work_context = ""
-    if state.get("work_queue"):
-        existing_work_context = f"Existing work context: {len(state.get('work_queue', []))} items in queue"
+    work_queue = safe_get_state_attr(state, "work_queue", [])
+    if work_queue:
+        existing_work_context = f"Existing work context: {len(work_queue)} items in queue"
     
     print(f"   📊 Analyzing project complexity for: {project_goals[:100]}...")
     
@@ -231,7 +239,7 @@ Focus on work items that:
             "iteration_state": iteration_state,
             "strategic_analysis": strategic_analysis,
             "current_phase": "delegation",
-            "messages": state.get("messages", []) + [f"CTO strategic analysis with {team_structure.complexity_score:.1f}/10 complexity: {strategic_analysis[:200]}..."]
+            "messages": safe_get_state_attr(state, "messages", []) + [f"CTO strategic analysis with {team_structure.complexity_score:.1f}/10 complexity: {strategic_analysis[:200]}..."]
         }
         
     except Exception as e:
@@ -254,7 +262,7 @@ async def llm_iteration_manager(state: states.State, config: RunnableConfig) -> 
     print("🔄 LLM Iteration Manager: Managing Iteration Transitions")
     print("=" * 60)
     
-    iteration_state = state.get("iteration_state", states.IterationState())
+    iteration_state = safe_get_state_attr(state, "iteration_state", states.IterationState())
     
     if not iteration_state.is_iterative:
         print("   ❌ Not in iterative mode, skipping iteration management")
@@ -262,7 +270,7 @@ async def llm_iteration_manager(state: states.State, config: RunnableConfig) -> 
     
     # Record results from current iteration
     current_iteration = iteration_state.current_iteration
-    completed_work = [w for w in state.get("completed_work", []) 
+    completed_work = [w for w in safe_get_state_attr(state, "completed_work", []) 
                      if w.iteration_batch == current_iteration]
     
     iteration_result = {
@@ -287,13 +295,13 @@ async def llm_iteration_manager(state: states.State, config: RunnableConfig) -> 
         return {
             "iteration_state": updated_iteration_state,
             "current_phase": "review",
-            "messages": state.get("messages", []) + [f"All {updated_iteration_state.total_iterations} iterations completed"]
+            "messages": safe_get_state_attr(state, "messages", []) + [f"All {updated_iteration_state.total_iterations} iterations completed"]
         }
     
     print(f"   ➡️  Advancing to iteration {updated_iteration_state.current_iteration + 1}/{updated_iteration_state.total_iterations}")
     
     # Reset manager state for next iteration
-    team_structure = state.get("team_structure", states.ComplexityBasedTeamStructure())
+    team_structure = safe_get_state_attr(state, "team_structure", states.ComplexityBasedTeamStructure())
     manager_ids = [f"manager_{i}" for i in range(team_structure.recommended_managers)]
     
     # Reset work items status for next iteration
@@ -301,7 +309,7 @@ async def llm_iteration_manager(state: states.State, config: RunnableConfig) -> 
                      if updated_iteration_state.current_iteration < len(updated_iteration_state.iteration_work_batches)
                      else [])
     
-    updated_work_queue = state.get("work_queue", []).copy()
+    updated_work_queue = safe_get_state_attr(state, "work_queue", []).copy()
     for work_item in updated_work_queue:
         if work_item.id in next_batch_ids:
             work_item.status = "pending"
@@ -313,7 +321,7 @@ async def llm_iteration_manager(state: states.State, config: RunnableConfig) -> 
         "active_engineers": {},  # Reset engineer assignments
         "work_queue": updated_work_queue,
         "current_phase": "delegation",
-        "messages": state.get("messages", []) + [f"Iteration {updated_iteration_state.current_iteration + 1} started with {len(next_batch_ids)} work items"]
+        "messages": safe_get_state_attr(state, "messages", []) + [f"Iteration {updated_iteration_state.current_iteration + 1} started with {len(next_batch_ids)} work items"]
     }
 
 
@@ -327,28 +335,28 @@ async def llm_engineering_manager(state: states.State, config: RunnableConfig) -
     model_with_tools = model.bind_tools(tools)
     
     # Get team structure from state
-    team_structure = state.get("team_structure", states.ComplexityBasedTeamStructure())
-    iteration_state = state.get("iteration_state", states.IterationState())
+    team_structure = safe_get_state_attr(state, "team_structure", states.ComplexityBasedTeamStructure())
+    iteration_state = safe_get_state_attr(state, "iteration_state", states.IterationState())
     
     print(f"   📊 Using Dynamic Team Structure:")
     print(f"      Managers: {team_structure.recommended_managers}")
     print(f"      Engineers per Manager: {team_structure.recommended_engineers_per_manager}")
     print(f"      Complexity Score: {team_structure.complexity_score:.1f}/10.0")
     
-    if not state.get("active_managers", []):
+    if not safe_get_state_attr(state, "active_managers", []):
         return {"current_phase": "execution"}
     
-    current_manager = state.get("active_managers", [])[0]
+    current_manager = safe_get_state_attr(state, "active_managers", [])[0]
     
     # Filter work for current iteration if using iterations
     available_work = []
     if iteration_state.is_iterative:
         current_batch_ids = iteration_state.iteration_work_batches[iteration_state.current_iteration] if iteration_state.current_iteration < len(iteration_state.iteration_work_batches) else []
-        available_work = [w for w in state.get("work_queue", []) if w.status == "pending" and w.id in current_batch_ids]
+        available_work = [w for w in safe_get_state_attr(state, "work_queue", []) if w.status == "pending" and w.id in current_batch_ids]
         print(f"   🔄 Iteration {iteration_state.current_iteration + 1}/{iteration_state.total_iterations}")
         print(f"      Work items in current batch: {len(available_work)}")
     else:
-        available_work = [w for w in state.get("work_queue", []) if w.status == "pending"]
+        available_work = [w for w in safe_get_state_attr(state, "work_queue", []) if w.status == "pending"]
     
     if not available_work:
         print("   ⚠️  No available work for current manager")
@@ -425,10 +433,10 @@ async def llm_engineering_manager(state: states.State, config: RunnableConfig) -
                 print(f"   📋 Assigned '{work_item.title}' to Senior Engineer: {assigned_engineer}")
         
         # Update state
-        updated_work_queue = [w for w in state.get("work_queue", []) if w not in manager_work] + manager_work
-        updated_active_engineers = state.get("active_engineers", {}).copy()
+        updated_work_queue = [w for w in safe_get_state_attr(state, "work_queue", []) if w not in manager_work] + manager_work
+        updated_active_engineers = safe_get_state_attr(state, "active_engineers", {}).copy()
         updated_active_engineers[current_manager] = team_members
-        remaining_managers = state.get("active_managers", [])[1:]
+        remaining_managers = safe_get_state_attr(state, "active_managers", [])[1:]
         
         # Check for iteration advancement
         next_phase = "execution" if not remaining_managers else "delegation"
@@ -445,7 +453,7 @@ async def llm_engineering_manager(state: states.State, config: RunnableConfig) -
             "active_engineers": updated_active_engineers,
             "delegation_plan": delegation_plan,
             "current_phase": next_phase,
-            "messages": state.get("messages", []) + [f"Engineering Manager ({team_structure.recommended_engineers_per_manager} engineers): {delegation_plan[:200]}..."]
+            "messages": safe_get_state_attr(state, "messages", []) + [f"Engineering Manager ({team_structure.recommended_engineers_per_manager} engineers): {delegation_plan[:200]}..."]
         }
         
     except Exception as e:
@@ -463,7 +471,7 @@ async def llm_senior_engineer(state: states.State, config: RunnableConfig) -> Di
     model_with_tools = model.bind_tools(tools)
     
     # Get work items assigned to senior engineers
-    senior_work = [w for w in state.get("work_queue", []) if w.status == "assigned" and w.assigned_to and "senior_eng" in w.assigned_to]
+    senior_work = [w for w in safe_get_state_attr(state, "work_queue", []) if w.status == "assigned" and w.assigned_to and "senior_eng" in w.assigned_to]
     
     if not senior_work:
         return {"current_phase": "execution"}
@@ -547,13 +555,13 @@ async def llm_senior_engineer(state: states.State, config: RunnableConfig) -> Di
                 work_item.status = "blocked"
                 work_item.result = f"BLOCKED - Capability gap detected by {engineer_id}: {implementation_details}"
                 
-                updated_work_queue = state.get("work_queue", []).copy()
+                updated_work_queue = safe_get_state_attr(state, "work_queue", []).copy()
                 for i, w in enumerate(updated_work_queue):
                     if w.id == work_item.id:
                         updated_work_queue[i] = work_item
                         break
                 
-                updated_requests = state.get("human_assistance_requests", []) + [assistance_request]
+                updated_requests = safe_get_state_attr(state, "human_assistance_requests", []) + [assistance_request]
                 
                 return {
                     "work_queue": updated_work_queue,
@@ -561,7 +569,7 @@ async def llm_senior_engineer(state: states.State, config: RunnableConfig) -> Di
                     "pending_human_intervention": True,
                     "current_phase": "human_assistance",
                     "implementation_details": f"Capability gap detected: {implementation_details}",
-                    "messages": state.get("messages", []) + [f"Senior Engineer {engineer_id}: Capability gap detected, human assistance requested"]
+                    "messages": safe_get_state_attr(state, "messages", []) + [f"Senior Engineer {engineer_id}: Capability gap detected, human assistance requested"]
                 }
         
         print(f"   LLM Senior Engineer {engineer_id} completed: {work_item.title}")
@@ -571,13 +579,13 @@ async def llm_senior_engineer(state: states.State, config: RunnableConfig) -> Di
         work_item.result = f"Development completed by {engineer_id}: {implementation_details}"
         work_item.evaluation_loop = states.EvaluationLoop()
         
-        updated_work_queue = state.get("work_queue", []).copy()
+        updated_work_queue = safe_get_state_attr(state, "work_queue", []).copy()
         for i, w in enumerate(updated_work_queue):
             if w.id == work_item.id:
                 updated_work_queue[i] = work_item
                 break
         
-        evaluation_queue = state.get("evaluation_queue", []) + [work_item]
+        evaluation_queue = safe_get_state_attr(state, "evaluation_queue", []) + [work_item]
         remaining_assigned = [w for w in updated_work_queue if w.status == "assigned"]
         next_phase = "evaluation" if evaluation_queue else ("review" if not remaining_assigned else "execution")
         
@@ -586,7 +594,7 @@ async def llm_senior_engineer(state: states.State, config: RunnableConfig) -> Di
             "evaluation_queue": evaluation_queue,
             "implementation_details": implementation_details,
             "current_phase": next_phase,
-            "messages": state.get("messages", []) + [f"Senior Engineer {engineer_id}: {implementation_details[:200]}..."]
+            "messages": safe_get_state_attr(state, "messages", []) + [f"Senior Engineer {engineer_id}: {implementation_details[:200]}..."]
         }
         
     except Exception as e:
@@ -604,7 +612,7 @@ async def llm_qa_engineer(state: states.State, config: RunnableConfig) -> Dict[s
     model_with_tools = model.bind_tools(tools)
     
     # Get work items assigned to QA engineers
-    qa_work = [w for w in state.get("work_queue", []) if w.status == "assigned" and w.assigned_to and "qa_engineer" in w.assigned_to]
+    qa_work = [w for w in safe_get_state_attr(state, "work_queue", []) if w.status == "assigned" and w.assigned_to and "qa_engineer" in w.assigned_to]
     
     if not qa_work:
         return {"current_phase": "execution"}
@@ -649,13 +657,13 @@ async def llm_qa_engineer(state: states.State, config: RunnableConfig) -> Dict[s
         work_item.status = "completed"
         work_item.result = f"QA testing completed by {engineer_id}: {qa_results}"
         
-        updated_work_queue = state.get("work_queue", []).copy()
+        updated_work_queue = safe_get_state_attr(state, "work_queue", []).copy()
         for i, w in enumerate(updated_work_queue):
             if w.id == work_item.id:
                 updated_work_queue[i] = work_item
                 break
         
-        completed_work = state.get("completed_work", []) + [work_item]
+        completed_work = safe_get_state_attr(state, "completed_work", []) + [work_item]
         remaining_assigned = [w for w in updated_work_queue if w.status == "assigned"]
         next_phase = "review" if not remaining_assigned else "execution"
         
@@ -664,7 +672,7 @@ async def llm_qa_engineer(state: states.State, config: RunnableConfig) -> Dict[s
             "completed_work": completed_work,
             "qa_results": qa_results,
             "current_phase": next_phase,
-            "messages": state.get("messages", []) + [f"QA Engineer {engineer_id}: {qa_results[:200]}..."]
+            "messages": safe_get_state_attr(state, "messages", []) + [f"QA Engineer {engineer_id}: {qa_results[:200]}..."]
         }
         
     except Exception as e:
@@ -676,7 +684,7 @@ async def llm_senior_engineer_aggregator(state: states.State, config: RunnableCo
     """Aggregates outputs from multiple senior engineers working in parallel on different tasks."""
     
     # Get completed development work from senior engineers that passed evaluation
-    completed_senior_work = [w for w in state.get("evaluation_queue", []) if 
+    completed_senior_work = [w for w in safe_get_state_attr(state, "evaluation_queue", []) if 
                             w.assigned_to and "senior_eng" in w.assigned_to and 
                             w.evaluation_loop and w.evaluation_loop.current_stage == "completed"]
     
@@ -711,10 +719,10 @@ async def llm_senior_engineer_aggregator(state: states.State, config: RunnableCo
     print(f"   Assigned to QA Engineer: {aggregated_work.assigned_to}")
     
     # Update work queue: remove individual completed items, add aggregated item
-    updated_work_queue = [w for w in state.get("work_queue", []) if w not in completed_senior_work] + [aggregated_work]
+    updated_work_queue = [w for w in safe_get_state_attr(state, "work_queue", []) if w not in completed_senior_work] + [aggregated_work]
     
     # Remove completed items from evaluation queue
-    updated_evaluation_queue = [w for w in state.get("evaluation_queue", []) if w not in completed_senior_work]
+    updated_evaluation_queue = [w for w in safe_get_state_attr(state, "evaluation_queue", []) if w not in completed_senior_work]
     
     return {
         "work_queue": updated_work_queue,
@@ -730,8 +738,8 @@ async def llm_review(state: states.State, config: RunnableConfig) -> Dict[str, A
     
     model = get_model_for_agent("review")
     
-    completed_count = len(state.get("completed_work", []))
-    total_managers = len(state.get("active_engineers", {}))
+    completed_count = len(safe_get_state_attr(state, "completed_work", []))
+    total_managers = len(safe_get_state_attr(state, "active_engineers", {}))
     
     system_prompt = """You are conducting a final project review and organizational analysis.
 
@@ -750,7 +758,7 @@ async def llm_review(state: states.State, config: RunnableConfig) -> Dict[str, A
     - Total managers created: {total_managers}
     - Team structure: {total_managers} management teams with QA and Senior Engineers
     
-    Recent messages: {state.get('messages', [])[-5:] if state.get('messages') else 'No recent messages'}
+    Recent messages: {safe_get_state_attr(state, 'messages', [])[-5:] if safe_get_state_attr(state, 'messages') else 'No recent messages'}
     """
     
     human_message = f"""Please provide a comprehensive review of this project:
@@ -773,7 +781,7 @@ async def llm_review(state: states.State, config: RunnableConfig) -> Dict[str, A
         return {
             "review_analysis": review_analysis,
             "current_phase": "completed",
-            "messages": state.get("messages", []) + [f"Final review: {review_analysis[:200]}..."]
+            "messages": safe_get_state_attr(state, "messages", []) + [f"Final review: {review_analysis[:200]}..."]
         }
         
     except Exception as e:
@@ -839,8 +847,8 @@ async def llm_human_assistance_coordinator(state: states.State, config: Runnable
     return {
         "current_phase": "human_assistance",
         "pending_human_intervention": True,
-        "messages": state.get("messages", []) + [f"Human Assistance Coordinator: {len(pending_requests)} requests pending human review"],
-        "implementation_details": state.get("implementation_details", "") + f"\n\nHUMAN ASSISTANCE REQUIRED:\n{assistance_summary}"
+        "messages": safe_get_state_attr(state, "messages", []) + [f"Human Assistance Coordinator: {len(pending_requests)} requests pending human review"],
+        "implementation_details": safe_get_state_attr(state, "implementation_details", "") + f"\n\nHUMAN ASSISTANCE REQUIRED:\n{assistance_summary}"
     }
 
 
@@ -855,19 +863,19 @@ async def llm_capability_gap_analyzer(state: states.State, config: RunnableConfi
     problem_work = []
     
     # Check failed work items
-    for work_item in state.get("failed_work", []):
+    for work_item in safe_get_state_attr(state, "failed_work", []):
         if work_item.result and any(keyword in work_item.result.lower() for keyword in 
                                    ["error", "failed", "unauthorized", "access denied", "missing"]):
             problem_work.append(work_item)
     
     # Check work items stuck in evaluation loops
-    for work_item in state.get("evaluation_queue", []):
+    for work_item in safe_get_state_attr(state, "evaluation_queue", []):
         if work_item.evaluation_loop.loop_count >= 2:  # Multiple failed attempts
             problem_work.append(work_item)
     
     if not problem_work:
         print("   No capability gaps detected")
-        return {"current_phase": state.get("current_phase", "execution")}
+        return {"current_phase": safe_get_state_attr(state, "current_phase", "execution")}
     
     print(f"   Analyzing {len(problem_work)} problematic work item(s)")
     
@@ -901,14 +909,14 @@ async def llm_capability_gap_analyzer(state: states.State, config: RunnableConfi
             new_requests.append(request)
     
     if new_requests:
-        updated_requests = state.get("human_assistance_requests", []) + new_requests
+        updated_requests = safe_get_state_attr(state, "human_assistance_requests", []) + new_requests
         print(f"   Created {len(new_requests)} assistance request(s)")
         
         return {
             "human_assistance_requests": updated_requests,
             "pending_human_intervention": True,
             "current_phase": "human_assistance",
-            "messages": state.get("messages", []) + [f"Capability Gap Analyzer: Created {len(new_requests)} assistance requests"]
+            "messages": safe_get_state_attr(state, "messages", []) + [f"Capability Gap Analyzer: Created {len(new_requests)} assistance requests"]
         }
     
-    return {"current_phase": state.get("current_phase", "execution")}
+    return {"current_phase": safe_get_state_attr(state, "current_phase", "execution")}
