@@ -1,0 +1,573 @@
+"""Comprehensive tool collection for all development team agents.
+
+All agents have access to all tools, with role-appropriate usage guided by prompting.
+Tools are organized by category for clarity but shared across all agent types.
+Enhanced with Command() and Send() capabilities for agent handoffs and collaboration.
+"""
+
+from typing import Dict, List, Any, Optional, Annotated
+from langchain_core.tools import tool, InjectedToolCallId
+from langgraph.types import Command
+from langgraph.prebuilt import InjectedState
+import requests
+import os
+import json
+import subprocess
+from datetime import datetime
+
+
+# =============================================================================
+# AGENT HANDOFF AND COLLABORATION TOOLS (NEW!)
+# =============================================================================
+
+@tool
+def transfer_to_qa_engineer(
+    reason: Annotated[str, "Reason for transferring to QA"],
+    context: Annotated[str, "Context and details for QA engineer"],
+    state: Annotated[dict, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId],
+    priority: str = "medium"
+) -> Command:
+    """Transfer work to QA engineer for testing and quality assurance."""
+    tool_message = {
+        "role": "tool",
+        "content": f"Work transferred to QA engineer. Reason: {reason}",
+        "name": "transfer_to_qa_engineer",
+        "tool_call_id": tool_call_id,
+    }
+    
+    return Command(
+        goto="qa_engineer",
+        update={
+            "messages": state.get("messages", []) + [tool_message],
+            "handoff_reason": reason,
+            "handoff_context": context,
+            "priority": priority,
+            "current_agent": "qa_engineer"
+        },
+        graph=Command.PARENT,
+    )
+
+
+@tool
+def escalate_to_cto(
+    issue: Annotated[str, "Issue requiring CTO attention"],
+    urgency: Annotated[str, "Urgency level: low, medium, high, critical"],
+    state: Annotated[dict, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId]
+) -> Command:
+    """Escalate complex technical or strategic decisions to CTO."""
+    tool_message = {
+        "role": "tool",
+        "content": f"Issue escalated to CTO: {issue}",
+        "name": "escalate_to_cto", 
+        "tool_call_id": tool_call_id,
+    }
+    
+    return Command(
+        goto="cto",
+        update={
+            "messages": state.get("messages", []) + [tool_message],
+            "escalation_issue": issue,
+            "escalation_urgency": urgency,
+            "requires_cto_decision": True,
+            "current_agent": "cto"
+        },
+        graph=Command.PARENT,
+    )
+
+
+@tool
+def request_peer_review(
+    work_description: Annotated[str, "Description of work needing review"],
+    review_focus: Annotated[str, "Specific areas to focus review on"],
+    state: Annotated[dict, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId]
+) -> Command:
+    """Request peer review of completed work."""
+    tool_message = {
+        "role": "tool",
+        "content": f"Peer review requested for: {work_description}",
+        "name": "request_peer_review",
+        "tool_call_id": tool_call_id,
+    }
+    
+    return Command(
+        goto="peer_review_evaluator",
+        update={
+            "messages": state.get("messages", []) + [tool_message],
+            "review_work": work_description,
+            "review_focus": review_focus,
+            "review_type": "peer_review",
+            "current_agent": "peer_review_evaluator"
+        },
+        graph=Command.PARENT,
+    )
+
+
+@tool
+def delegate_to_engineering_manager(
+    task_breakdown: Annotated[str, "Description of tasks to delegate"],
+    coordination_needed: Annotated[bool, "Whether coordination between engineers is needed"],
+    state: Annotated[dict, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId]
+) -> Command:
+    """Delegate complex work requiring team coordination to engineering manager."""
+    tool_message = {
+        "role": "tool",
+        "content": f"Work delegated to engineering manager: {task_breakdown}",
+        "name": "delegate_to_engineering_manager",
+        "tool_call_id": tool_call_id,
+    }
+    
+    return Command(
+        goto="engineering_manager",
+        update={
+            "messages": state.get("messages", []) + [tool_message],
+            "delegated_tasks": task_breakdown,
+            "requires_coordination": coordination_needed,
+            "current_agent": "engineering_manager"
+        },
+        graph=Command.PARENT,
+    )
+
+
+@tool
+def transfer_to_senior_engineer(
+    task_description: Annotated[str, "Description of development task"],
+    technical_requirements: Annotated[str, "Specific technical requirements"],
+    state: Annotated[dict, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId]
+) -> Command:
+    """Transfer development work to senior engineer."""
+    tool_message = {
+        "role": "tool",
+        "content": f"Development task assigned to senior engineer: {task_description}",
+        "name": "transfer_to_senior_engineer",
+        "tool_call_id": tool_call_id,
+    }
+    
+    return Command(
+        goto="senior_engineer",
+        update={
+            "messages": state.get("messages", []) + [tool_message],
+            "assigned_task": task_description,
+            "technical_requirements": technical_requirements,
+            "current_agent": "senior_engineer"
+        },
+        graph=Command.PARENT,
+    )
+
+
+@tool
+def escalate_to_human(
+    decision_needed: Annotated[str, "Decision requiring human judgment"],
+    background_context: Annotated[str, "Background context for the human"],
+    state: Annotated[dict, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId]
+) -> Command:
+    """Escalate decisions requiring human judgment to human evaluator."""
+    tool_message = {
+        "role": "tool",
+        "content": f"Escalated to human: {decision_needed}",
+        "name": "escalate_to_human",
+        "tool_call_id": tool_call_id,
+    }
+    
+    return Command(
+        goto="human_escalation_evaluator",
+        update={
+            "messages": state.get("messages", []) + [tool_message],
+            "human_decision_needed": decision_needed,
+            "decision_context": background_context,
+            "requires_human_input": True,
+            "current_agent": "human_escalation_evaluator"
+        },
+        graph=Command.PARENT,
+    )
+
+
+# =============================================================================
+# RESEARCH & COMMUNICATION TOOLS  
+# =============================================================================
+
+@tool
+def web_search(query: str, num_results: int = 5) -> str:
+    """Search the web for information using a search query.
+    
+    Args:
+        query: The search query string
+        num_results: Number of results to return (default 5)
+        
+    Returns:
+        Formatted search results with titles, URLs, and snippets
+    """
+    # Placeholder implementation - would integrate with actual search API
+    return f"Web search results for '{query}':\n1. Sample result about {query}\n2. Another relevant result\n..."
+
+
+@tool
+def send_message(recipient: str, message: str, priority: str = "normal") -> str:
+    """Send a message to another team member or stakeholder.
+    
+    Args:
+        recipient: The person or team to send the message to
+        message: The message content
+        priority: Message priority (low, normal, high, urgent)
+        
+    Returns:
+        Confirmation of message sent
+    """
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return f"Message sent to {recipient} at {timestamp} (Priority: {priority}): {message[:50]}..."
+
+
+@tool
+def check_messages() -> str:
+    """Check for new messages and notifications.
+    
+    Returns:
+        List of recent messages and notifications
+    """
+    # Placeholder - would integrate with actual messaging system
+    return "Recent messages:\n- CTO: Status update on API development\n- QA Team: Test results available\n..."
+
+
+# =============================================================================
+# DOCUMENT & KNOWLEDGE MANAGEMENT
+# =============================================================================
+
+@tool
+def search_documents(query: str, doc_type: str = "all") -> str:
+    """Search through project documentation and knowledge base.
+    
+    Args:
+        query: Search terms for finding relevant documents
+        doc_type: Type of documents (requirements, design, api, test, all)
+        
+    Returns:
+        List of relevant documents with excerpts
+    """
+    return f"Document search for '{query}' in {doc_type} documents:\n- API Documentation: Section 3.2\n- Requirements Doc: User Story #45\n..."
+
+
+@tool
+def create_document(title: str, content: str, doc_type: str = "general") -> str:
+    """Create a new document in the project knowledge base.
+    
+    Args:
+        title: Document title
+        content: Document content
+        doc_type: Document type (requirements, design, api, test, meeting_notes)
+        
+    Returns:
+        Confirmation with document ID
+    """
+    doc_id = f"DOC-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    return f"Document created: {title} (ID: {doc_id}, Type: {doc_type})"
+
+
+@tool
+def update_document(doc_id: str, content: str) -> str:
+    """Update an existing document.
+    
+    Args:
+        doc_id: The document identifier to update
+        content: New or additional content
+        
+    Returns:
+        Confirmation of update
+    """
+    return f"Document {doc_id} updated successfully with new content"
+
+
+# =============================================================================
+# DATABASE & DATA TOOLS
+# =============================================================================
+
+@tool
+def query_database(query: str, database: str = "main") -> str:
+    """Execute a database query for project data.
+    
+    Args:
+        query: SQL query to execute
+        database: Target database (main, test, analytics)
+        
+    Returns:
+        Query results in formatted text
+    """
+    # Placeholder - would execute actual database queries
+    return f"Database query executed on {database}:\nResults: [Sample data rows...]"
+
+
+@tool
+def get_project_metrics() -> str:
+    """Retrieve current project metrics and KPIs.
+    
+    Returns:
+        Current project health metrics
+    """
+    return """Project Metrics:
+- Tasks Completed: 45/60 (75%)
+- Code Coverage: 82%
+- Build Success Rate: 95%
+- Bug Count: 12 open, 45 resolved
+- Sprint Progress: Day 8/14"""
+
+
+# =============================================================================
+# FILESYSTEM & CODE TOOLS
+# =============================================================================
+
+@tool
+def read_file(file_path: str) -> str:
+    """Read the contents of a file.
+    
+    Args:
+        file_path: Path to the file to read
+        
+    Returns:
+        File contents as string
+    """
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        return f"File contents of {file_path}:\n{content}"
+    except Exception as e:
+        return f"Error reading file {file_path}: {str(e)}"
+
+
+@tool
+def write_file(file_path: str, content: str) -> str:
+    """Write content to a file.
+    
+    Args:
+        file_path: Path where to write the file
+        content: Content to write
+        
+    Returns:
+        Confirmation of file written
+    """
+    try:
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        return f"File written successfully: {file_path}"
+    except Exception as e:
+        return f"Error writing file {file_path}: {str(e)}"
+
+
+@tool
+def list_files(directory: str = ".", pattern: str = "*") -> str:
+    """List files in a directory with optional pattern matching.
+    
+    Args:
+        directory: Directory to list files from
+        pattern: File pattern to match (e.g., "*.py")
+        
+    Returns:
+        List of matching files
+    """
+    try:
+        import glob
+        files = glob.glob(os.path.join(directory, pattern))
+        return f"Files in {directory} matching '{pattern}':\n" + "\n".join(files)
+    except Exception as e:
+        return f"Error listing files: {str(e)}"
+
+
+# =============================================================================
+# CODE DEVELOPMENT TOOLS
+# =============================================================================
+
+@tool
+def run_code(code: str, language: str = "python") -> str:
+    """Execute code in a safe environment.
+    
+    Args:
+        code: Code to execute
+        language: Programming language (python, javascript, bash)
+        
+    Returns:
+        Code execution results
+    """
+    # Placeholder - would execute in sandboxed environment
+    return f"Code execution ({language}):\n{code}\n\nOutput: [Execution results would appear here]"
+
+
+@tool
+def run_tests(test_path: str = "tests/", test_type: str = "unit") -> str:
+    """Run automated tests.
+    
+    Args:
+        test_path: Path to test files
+        test_type: Type of tests (unit, integration, e2e)
+        
+    Returns:
+        Test execution results
+    """
+    return f"Running {test_type} tests from {test_path}:\n✅ 15 passed\n❌ 2 failed\n⚠️ 1 skipped"
+
+
+@tool
+def git_status() -> str:
+    """Get current git repository status.
+    
+    Returns:
+        Git status information
+    """
+    try:
+        result = subprocess.run(['git', 'status', '--porcelain'], 
+                              capture_output=True, text=True)
+        return f"Git status:\n{result.stdout}"
+    except Exception as e:
+        return f"Error getting git status: {str(e)}"
+
+
+@tool
+def git_commit(message: str, files: List[str] = None) -> str:
+    """Commit changes to git repository.
+    
+    Args:
+        message: Commit message
+        files: Specific files to commit (if None, commits all staged)
+        
+    Returns:
+        Commit confirmation
+    """
+    return f"Git commit created: {message} (Files: {files or 'all staged'})"
+
+
+# =============================================================================
+# PROJECT MANAGEMENT TOOLS
+# =============================================================================
+
+@tool
+def create_task(title: str, description: str, assignee: str = None, priority: str = "medium") -> str:
+    """Create a new project task.
+    
+    Args:
+        title: Task title
+        description: Detailed task description
+        assignee: Person assigned to the task
+        priority: Task priority (low, medium, high, critical)
+        
+    Returns:
+        Task creation confirmation with ID
+    """
+    task_id = f"TASK-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    return f"Task created: {title} (ID: {task_id}, Assignee: {assignee}, Priority: {priority})"
+
+
+@tool
+def update_task_status(task_id: str, status: str, notes: str = "") -> str:
+    """Update the status of an existing task.
+    
+    Args:
+        task_id: The task identifier
+        status: New status (todo, in_progress, review, done, blocked)
+        notes: Optional notes about the status change
+        
+    Returns:
+        Status update confirmation
+    """
+    return f"Task {task_id} status updated to '{status}'. Notes: {notes}"
+
+
+@tool
+def get_team_workload() -> str:
+    """Get current workload distribution across team members.
+    
+    Returns:
+        Team workload summary
+    """
+    return """Team Workload:
+- Alice (Senior Engineer): 8 tasks (3 in progress)
+- Bob (QA Engineer): 5 tasks (2 in progress)
+- Carol (Engineering Manager): 12 tasks (5 in progress)
+- Dave (Senior Engineer): 6 tasks (2 in progress)"""
+
+
+# =============================================================================
+# EMAIL & COMMUNICATION TOOLS (Leadership)
+# =============================================================================
+
+@tool
+def send_email(to: str, subject: str, body: str, cc: str = None) -> str:
+    """Send an email to stakeholders.
+    
+    Args:
+        to: Primary recipient email
+        subject: Email subject line
+        body: Email body content
+        cc: CC recipients (optional)
+        
+    Returns:
+        Email sent confirmation
+    """
+    return f"Email sent to {to} (CC: {cc}) - Subject: {subject}"
+
+
+@tool
+def schedule_meeting(title: str, participants: List[str], duration_minutes: int = 60, date_time: str = None) -> str:
+    """Schedule a meeting with team members.
+    
+    Args:
+        title: Meeting title
+        participants: List of participant emails/names
+        duration_minutes: Meeting duration in minutes
+        date_time: Preferred date/time (if None, suggests next available)
+        
+    Returns:
+        Meeting scheduling confirmation
+    """
+    meeting_id = f"MEET-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    return f"Meeting scheduled: {title} (ID: {meeting_id}, Participants: {len(participants)}, Duration: {duration_minutes}min)"
+
+
+# =============================================================================
+# TOOL COLLECTIONS FOR AGENT INITIALIZATION
+# =============================================================================
+
+def get_all_tools() -> List:
+    """Get all available tools for agent initialization.
+    
+    Returns:
+        List of all tool functions including handoff capabilities
+    """
+    return [
+        # Agent Handoff & Collaboration (NEW!)
+        transfer_to_qa_engineer, escalate_to_cto, request_peer_review,
+        delegate_to_engineering_manager, transfer_to_senior_engineer, escalate_to_human,
+        
+        # Research & Communication
+        web_search, send_message, check_messages,
+        
+        # Document & Knowledge Management
+        search_documents, create_document, update_document,
+        
+        # Database & Data
+        query_database, get_project_metrics,
+        
+        # Filesystem & Code
+        read_file, write_file, list_files,
+        
+        # Code Development
+        run_code, run_tests, git_status, git_commit,
+        
+        # Project Management
+        create_task, update_task_status, get_team_workload,
+        
+        # Email & Communication (Leadership)
+        send_email, schedule_meeting
+    ]
+
+
+def get_tool_descriptions() -> Dict[str, str]:
+    """Get descriptions of all available tools for agent awareness.
+    
+    Returns:
+        Dictionary mapping tool names to their descriptions
+    """
+    tools = get_all_tools()
+    return {tool.name: tool.description for tool in tools}
