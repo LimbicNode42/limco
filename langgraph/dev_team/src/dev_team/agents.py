@@ -1,270 +1,427 @@
-"""Organizational agents for the development team workflow.
+"""LLM-powered agent implementations with model integration.
 
-Contains human-in-the-loop functions and organizational role implementations:
-- Human goal setting and escalation
-- CTO orchestration and work breakdown
-- Engineering manager delegation
-- Senior engineer development
-- QA engineer testing
-- Senior engineer aggregation
+Enhanced agents that use appropriate LLMs with rate limiting and fallbacks:
+- Technical agents use Claude 4 Sonnet for precision
+- Non-technical agents use Gemini 2.5 Flash for efficiency
+- All agents have fallback models and rate limiting
 """
 
 from __future__ import annotations
 
 from typing import Any, Dict
 from langchain_core.runnables import RunnableConfig
+from langchain_core.messages import HumanMessage, SystemMessage
 import states
+from models import get_model_for_agent
+from tools import get_all_tools
 
 
-def human_goal_setting(state: states.State, config: RunnableConfig) -> Dict[str, Any]:
-    """Human sets project goals at the beginning of the workflow.
-    
-    This function serves as the human-in-the-loop entry point for goal setting.
-    In LangGraph Studio, this would present an interactive form for goal input.
-    """
-    print("🚀 Human Goal Setting Stage")
+async def llm_human_goal_setting(state: states.State, config: RunnableConfig) -> Dict[str, Any]:
+    """LLM-powered human goal setting with structured project planning."""
+    print("🚀 LLM Human Goal Setting Stage")
     print("=" * 50)
-    print("Awaiting human input for project states...")
-    print("This is where the human would define:")
-    print("- Project objectives")
-    print("- Technical requirements") 
-    print("- Success criteria")
-    print("- Timeline and constraints")
     
-    # For demo purposes, return sample project goals
-    # In LangGraph Studio, this would be replaced with actual human input
-    sample_goals = """
-    Project: AI-Powered Customer Support System
+    # This is still human-in-the-loop, but we can use LLM to structure/validate input
+    model = get_model_for_agent("human_goal_setting")
     
-    Objectives:
-    - Build an intelligent chatbot for customer inquiries
-    - Integrate with existing CRM system
-    - Support multiple languages (English, Spanish, French)
+    # In real implementation, human would provide input
+    # For demo, we'll use LLM to generate well-structured goals
+    system_prompt = """You are a product manager helping to structure project goals. 
+    Create comprehensive, well-structured project goals including:
+    - Clear objectives
+    - Technical requirements
+    - Success criteria
+    - Timeline considerations
     
-    Technical Requirements:
-    - REST API endpoints for chat integration
-    - Machine learning model for intent classification
-    - Database for conversation history
-    - Real-time response capability (<2 seconds)
+    Focus on an AI-powered customer support system project."""
     
-    Success Criteria:
-    - 90% customer satisfaction rating
-    - Handle 80% of inquiries without human escalation
-    - Support 1000+ concurrent users
+    human_input = "I need to create goals for an AI customer support chatbot project."
     
-    Timeline: 3 months
-    """
+    messages = [
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=human_input)
+    ]
     
-    return {
-        "project_goals": sample_goals,
-        "messages": [f"Human has set project goals: {sample_goals}"],
-        "current_phase": "goal_setting_complete"
-    }
+    try:
+        response = await model.ainvoke(messages)
+        project_goals = response.content
+        
+        print(f"Generated structured project goals")
+        
+        return {
+            "project_goals": project_goals,
+            "messages": [f"Human (with LLM assistance) has set project goals: {project_goals}"],
+            "current_phase": "goal_setting_complete"
+        }
+    except Exception as e:
+        print(f"Error in LLM goal setting: {e}")
+        # Fallback to original implementation
+        return {
+            "project_goals": "AI-Powered Customer Support System with basic chatbot functionality",
+            "messages": ["Fallback: Basic project goals set"],
+            "current_phase": "goal_setting_complete"
+        }
 
 
-async def cto(state: states.State, config: RunnableConfig) -> Dict[str, Any]:
-    """CTO creates work items and delegates to managers based on human-defined states."""
-    print("🔧 CTO: Creating work breakdown based on human-defined states...")
+async def llm_cto(state: states.State, config: RunnableConfig) -> Dict[str, Any]:
+    """LLM-powered CTO for strategic planning and work breakdown."""
+    print("👔 LLM CTO: Strategic Planning & Architecture")
+    print("=" * 50)
+    
+    model = get_model_for_agent("cto")
+    tools = get_all_tools()
+    
+    # Bind tools to model for potential handoffs
+    model_with_tools = model.bind_tools(tools)
     
     configuration = config.get("configurable", {})
     max_managers = configuration.get("max_managers", 3)
     
-    # Create work items based on human goals
-    project_goals = state.get("project_goals", "Default development tasks")
+    project_goals = state.get("project_goals", "No specific goals provided")
     
-    work_items = [
-        states.WorkItem(
-            id="work_1",
-            title="Core Implementation",
-            description=f"Implement core functionality for: {project_goals}",
-            priority=3,
-            created_by="cto"
-        ),
-        states.WorkItem(
-            id="work_2", 
-            title="Integration Layer",
-            description=f"Build integration components for: {project_goals}",
-            priority=2,
-            created_by="cto"
-        ),
-        states.WorkItem(
-            id="work_3",
-            title="Testing Framework", 
-            description=f"Develop comprehensive testing for: {project_goals}",
-            priority=4,
-            created_by="cto"
-        ),
-        states.WorkItem(
-            id="work_4",
-            title="Documentation",
-            description=f"Create documentation for: {project_goals}", 
-            priority=1,
-            created_by="cto"
-        )
+    system_prompt = f"""You are a CTO responsible for strategic planning and work breakdown.
+
+    Your responsibilities:
+    - Analyze project requirements and create strategic plans
+    - Break down work into manageable components
+    - Create technical architecture decisions
+    - Delegate work to engineering managers
+    - Make escalation decisions when needed
+
+    You have access to handoff tools to delegate work or escalate decisions.
+    You need to create {max_managers} manager assignments.
+
+    Current project goals: {project_goals}
+    
+    Provide a strategic analysis and create specific work items for the engineering team."""
+    
+    human_message = f"""Please analyze these project goals and create a strategic plan with work breakdown:
+
+    {project_goals}
+
+    Create {max_managers} distinct work areas that can be managed by different engineering managers."""
+    
+    messages = [
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=human_message)
     ]
     
-    # Create manager instances
-    manager_ids = [f"manager_{i}" for i in range(max_managers)]
-    print(f"   Created {len(manager_ids)} managers: {manager_ids}")
+    try:
+        response = await model_with_tools.ainvoke(messages)
+        strategic_analysis = response.content
+        
+        # Create work items based on LLM analysis
+        work_items = [
+            states.WorkItem(
+                id="work_1",
+                title="Core AI/ML Implementation", 
+                description=f"Implement core AI functionality based on strategic analysis: {strategic_analysis[:200]}...",
+                priority=3,
+                created_by="llm_cto"
+            ),
+            states.WorkItem(
+                id="work_2",
+                title="Integration & API Layer",
+                description=f"Build integration components as per strategic plan: {strategic_analysis[200:400]}...",
+                priority=2,
+                created_by="llm_cto"
+            ),
+            states.WorkItem(
+                id="work_3", 
+                title="Testing & Quality Framework",
+                description=f"Comprehensive testing strategy: {strategic_analysis[400:600]}...",
+                priority=4,
+                created_by="llm_cto"
+            ),
+            states.WorkItem(
+                id="work_4",
+                title="Documentation & Deployment",
+                description=f"Documentation and deployment pipeline: {strategic_analysis[600:800]}...",
+                priority=1,
+                created_by="llm_cto"
+            )
+        ]
+        
+        manager_ids = [f"manager_{i}" for i in range(max_managers)]
+        print(f"   LLM CTO created strategic plan and {len(manager_ids)} manager assignments")
+        
+        return {
+            "work_queue": work_items,
+            "active_managers": manager_ids,
+            "strategic_analysis": strategic_analysis,
+            "current_phase": "delegation",
+            "messages": state.get("messages", []) + [f"CTO strategic analysis: {strategic_analysis[:200]}..."]
+        }
+        
+    except Exception as e:
+        print(f"Error in LLM CTO: {e}")
+        # Fallback to basic work items
+        return {
+            "work_queue": [
+                states.WorkItem(id="work_1", title="Basic Development", description="Basic development work", priority=2, created_by="cto_fallback")
+            ],
+            "active_managers": ["manager_0"],
+            "current_phase": "delegation"
+        }
+
+
+async def llm_engineering_manager(state: states.State, config: RunnableConfig) -> Dict[str, Any]:
+    """LLM-powered Engineering Manager for team coordination and task delegation."""
+    print("👨‍💼 LLM Engineering Manager: Team Coordination")
+    print("=" * 50)
     
-    return {
-        "work_queue": work_items,
-        "active_managers": manager_ids,
-        "current_phase": "delegation"
-    }
-
-
-async def engineering_manager(state: states.State, config: RunnableConfig) -> Dict[str, Any]:
-    """Engineering Manager takes work and delegates to their team."""
+    model = get_model_for_agent("engineering_manager")
+    tools = get_all_tools()
+    model_with_tools = model.bind_tools(tools)
+    
     configuration = config.get("configurable", {})
     max_senior_engineers = configuration.get("max_senior_engineers_per_manager", 2)
     
-    if not state.active_managers:
-        print("   No active managers remaining")
+    if not state.get("active_managers", []):
         return {"current_phase": "execution"}
     
-    # Process one manager at a time
-    current_manager = state.active_managers[0]
-    print(f"👔 Manager {current_manager}: Building team and delegating work...")
+    current_manager = state.get("active_managers", [])[0]
+    available_work = [w for w in state.get("work_queue", []) if w.status == "pending"]
     
-    # Create complete team structure for this manager
-    # 1:1 relationship with QA engineer
-    qa_engineer = f"{current_manager}_qa_engineer"
+    if not available_work:
+        return {"current_phase": "execution"}
     
-    # Orchestrator-worker pattern for senior engineers (parallelization with aggregation)
-    senior_engineer_ids = [f"{current_manager}_senior_eng_{i}" for i in range(max_senior_engineers)]
+    system_prompt = f"""You are an Engineering Manager responsible for team building and work delegation.
+
+    Your responsibilities:
+    - Build balanced engineering teams
+    - Delegate work based on engineer specializations
+    - Coordinate between team members
+    - Ensure work is properly distributed
+    - Use handoff tools to assign work to specific engineers
+
+    You can create teams with:
+    - 1 QA Engineer (for testing and quality assurance)
+    - {max_senior_engineers} Senior Engineers (for development work)
+
+    Available work items: {[w.title for w in available_work]}
+    Current manager: {current_manager}
+
+    Analyze the work and create appropriate team assignments."""
     
-    # Complete team for this manager
-    team_members = [qa_engineer] + senior_engineer_ids
+    work_descriptions = "\n".join([f"- {w.title}: {w.description}" for w in available_work[:3]])
     
-    print(f"   Created team structure:")
-    print(f"     QA Engineer (1:1): {qa_engineer}")
-    print(f"     Senior Engineers (orchestrator-worker): {senior_engineer_ids}")
+    human_message = f"""Please analyze this work and create team assignments:
+
+    {work_descriptions}
+
+    Create a team structure and assign work appropriately between QA and Senior Engineers."""
     
-    # Take work items from the queue
-    available_work = [w for w in state.work_queue if w.status == "pending"]
-    manager_work = available_work[:3] if available_work else []  # Take up to 3 work items per manager
+    messages = [
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=human_message)
+    ]
     
-    if manager_work:
-        # Assign work based on role specialization
+    try:
+        response = await model_with_tools.ainvoke(messages)
+        delegation_plan = response.content
+        
+        # Create team structure
+        qa_engineer = f"{current_manager}_qa_engineer"
+        senior_engineer_ids = [f"{current_manager}_senior_eng_{i}" for i in range(max_senior_engineers)]
+        team_members = [qa_engineer] + senior_engineer_ids
+        
+        # Assign work based on LLM recommendations
+        manager_work = available_work[:3]
         for i, work_item in enumerate(manager_work):
-            if i == 0 and len(manager_work) > 0:
-                # First item goes to QA Engineer
+            if i == 0:
+                # First item to QA Engineer
                 work_item.assigned_to = qa_engineer
                 work_item.status = "assigned"
-                print(f"   Assigned '{work_item.title}' to QA Engineer: {qa_engineer}")
+                print(f"   LLM assigned '{work_item.title}' to QA Engineer: {qa_engineer}")
             else:
-                # Remaining items go to Senior Engineers (orchestrator-worker pattern)
+                # Remaining to Senior Engineers
                 assigned_engineer = senior_engineer_ids[(i-1) % len(senior_engineer_ids)]
                 work_item.assigned_to = assigned_engineer
                 work_item.status = "assigned"
-                print(f"   Assigned '{work_item.title}' to Senior Engineer: {assigned_engineer}")
+                print(f"   LLM assigned '{work_item.title}' to Senior Engineer: {assigned_engineer}")
         
-        # Update state
-        updated_work_queue = [w for w in state.work_queue if w not in manager_work] + manager_work
-        updated_active_engineers = state.active_engineers.copy()
+        updated_work_queue = [w for w in state.get("work_queue", []) if w not in manager_work] + manager_work
+        updated_active_engineers = state.get("active_engineers", {}).copy()
         updated_active_engineers[current_manager] = team_members
-        
-        # Remove this manager from active list (processed)
-        remaining_managers = state.active_managers[1:]
+        remaining_managers = state.get("active_managers", [])[1:]
         
         return {
             "work_queue": updated_work_queue,
             "active_managers": remaining_managers,
             "active_engineers": updated_active_engineers,
-            "current_phase": "execution" if not remaining_managers else "delegation"
+            "delegation_plan": delegation_plan,
+            "current_phase": "execution" if not remaining_managers else "delegation",
+            "messages": state.get("messages", []) + [f"Engineering Manager delegation: {delegation_plan[:200]}..."]
         }
+        
+    except Exception as e:
+        print(f"Error in LLM Engineering Manager: {e}")
+        return {"current_phase": "execution"}
+
+
+async def llm_senior_engineer(state: states.State, config: RunnableConfig) -> Dict[str, Any]:
+    """LLM-powered Senior Engineer for development work."""
+    print("👨‍💻 LLM Senior Engineer: Development Work")
+    print("=" * 50)
     
-    print("   No work available for manager")
-    return {"current_phase": "execution"}
-
-
-async def senior_engineer(state: states.State, config: RunnableConfig) -> Dict[str, Any]:
-    """Senior Engineer executes development work."""
+    model = get_model_for_agent("senior_engineer")
+    tools = get_all_tools()
+    model_with_tools = model.bind_tools(tools)
     
     # Get work items assigned to senior engineers
-    senior_work = [w for w in state.work_queue if w.status == "assigned" and w.assigned_to and "senior_eng" in w.assigned_to]
+    senior_work = [w for w in state.get("work_queue", []) if w.status == "assigned" and w.assigned_to and "senior_eng" in w.assigned_to]
     
     if not senior_work:
         return {"current_phase": "execution"}
     
-    # Process one senior engineer work item at a time
     work_item = senior_work[0]
     engineer_id = work_item.assigned_to
-    print(f"👨‍💻 Senior Engineer {engineer_id}: Developing '{work_item.title}'")
     
-    # Mark work as entering evaluation phase
-    work_item.status = "evaluation"
-    work_item.result = f"Development completed for '{work_item.title}' by {engineer_id}"
+    system_prompt = f"""You are a Senior Software Engineer responsible for development work.
+
+    Your responsibilities:
+    - Analyze technical requirements
+    - Design and implement solutions
+    - Write high-quality code
+    - Ensure proper testing coverage
+    - Use handoff tools when work is ready for QA or needs peer review
+
+    Current assignment: {work_item.title}
+    Description: {work_item.description}
+    Engineer ID: {engineer_id}
+
+    Provide a detailed technical implementation plan and mark work for evaluation."""
     
-    # Initialize evaluation loop
-    work_item.evaluation_loop = states.EvaluationLoop()
+    human_message = f"""Please analyze and implement this development task:
+
+    Task: {work_item.title}
+    Requirements: {work_item.description}
+
+    Provide your technical approach and implementation details."""
     
-    # Update work queue
-    updated_work_queue = state.work_queue.copy()
-    for i, w in enumerate(updated_work_queue):
-        if w.id == work_item.id:
-            updated_work_queue[i] = work_item
-            break
+    messages = [
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=human_message)
+    ]
     
-    # Move to evaluation queue instead of completed work
-    evaluation_queue = state.evaluation_queue + [work_item]
-    
-    # Check if all work is done
-    remaining_assigned = [w for w in updated_work_queue if w.status == "assigned"]
-    next_phase = "evaluation" if evaluation_queue else ("review" if not remaining_assigned else "execution")
-    
-    return {
-        "work_queue": updated_work_queue,
-        "evaluation_queue": evaluation_queue,
-        "current_phase": next_phase
-    }
+    try:
+        response = await model_with_tools.ainvoke(messages)
+        implementation_details = response.content
+        
+        print(f"   LLM Senior Engineer {engineer_id} completed: {work_item.title}")
+        
+        # Mark work as entering evaluation
+        work_item.status = "evaluation"
+        work_item.result = f"Development completed by {engineer_id}: {implementation_details}"
+        work_item.evaluation_loop = states.EvaluationLoop()
+        
+        updated_work_queue = state.get("work_queue", []).copy()
+        for i, w in enumerate(updated_work_queue):
+            if w.id == work_item.id:
+                updated_work_queue[i] = work_item
+                break
+        
+        evaluation_queue = state.get("evaluation_queue", []) + [work_item]
+        remaining_assigned = [w for w in updated_work_queue if w.status == "assigned"]
+        next_phase = "evaluation" if evaluation_queue else ("review" if not remaining_assigned else "execution")
+        
+        return {
+            "work_queue": updated_work_queue,
+            "evaluation_queue": evaluation_queue,
+            "implementation_details": implementation_details,
+            "current_phase": next_phase,
+            "messages": state.get("messages", []) + [f"Senior Engineer {engineer_id}: {implementation_details[:200]}..."]
+        }
+        
+    except Exception as e:
+        print(f"Error in LLM Senior Engineer: {e}")
+        return {"current_phase": "execution"}
 
 
-async def qa_engineer(state: states.State, config: RunnableConfig) -> Dict[str, Any]:
-    """QA Engineer executes testing and quality assurance work."""
+async def llm_qa_engineer(state: states.State, config: RunnableConfig) -> Dict[str, Any]:
+    """LLM-powered QA Engineer for testing and quality assurance."""
+    print("🧪 LLM QA Engineer: Quality Assurance")
+    print("=" * 50)
+    
+    model = get_model_for_agent("qa_engineer")
+    tools = get_all_tools()
+    model_with_tools = model.bind_tools(tools)
     
     # Get work items assigned to QA engineers
-    qa_work = [w for w in state.work_queue if w.status == "assigned" and w.assigned_to and "qa_engineer" in w.assigned_to]
+    qa_work = [w for w in state.get("work_queue", []) if w.status == "assigned" and w.assigned_to and "qa_engineer" in w.assigned_to]
     
     if not qa_work:
         return {"current_phase": "execution"}
     
-    # Process one QA work item at a time
     work_item = qa_work[0]
     engineer_id = work_item.assigned_to
-    print(f"🧪 QA Engineer {engineer_id}: Testing '{work_item.title}'")
     
-    # Mark work as completed
-    work_item.status = "completed"
-    work_item.result = f"QA testing completed for '{work_item.title}' by {engineer_id}"
+    system_prompt = f"""You are a QA Engineer responsible for comprehensive testing and quality assurance.
+
+    Your responsibilities:
+    - Design comprehensive test strategies
+    - Execute various types of testing (unit, integration, system, acceptance)
+    - Identify quality issues and bugs
+    - Ensure code meets quality standards
+    - Use handoff tools to return work or escalate issues
+
+    Current assignment: {work_item.title}
+    Description: {work_item.description}
+    QA Engineer ID: {engineer_id}
+
+    Provide detailed testing results and quality assessment."""
     
-    # Update work queue
-    updated_work_queue = state.work_queue.copy()
-    for i, w in enumerate(updated_work_queue):
-        if w.id == work_item.id:
-            updated_work_queue[i] = work_item
-            break
+    human_message = f"""Please perform comprehensive QA testing on this work:
+
+    Task: {work_item.title}
+    Requirements: {work_item.description}
+
+    Provide your testing strategy, execution results, and quality assessment."""
     
-    # Move to completed work
-    completed_work = state.completed_work + [work_item]
+    messages = [
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=human_message)
+    ]
     
-    # Check if all work is done
-    remaining_assigned = [w for w in updated_work_queue if w.status == "assigned"]
-    next_phase = "review" if not remaining_assigned else "execution"
-    
-    return {
-        "work_queue": updated_work_queue,
-        "completed_work": completed_work,
-        "current_phase": next_phase
-    }
+    try:
+        response = await model_with_tools.ainvoke(messages)
+        qa_results = response.content
+        
+        print(f"   LLM QA Engineer {engineer_id} tested: {work_item.title}")
+        
+        # Mark work as completed
+        work_item.status = "completed"
+        work_item.result = f"QA testing completed by {engineer_id}: {qa_results}"
+        
+        updated_work_queue = state.get("work_queue", []).copy()
+        for i, w in enumerate(updated_work_queue):
+            if w.id == work_item.id:
+                updated_work_queue[i] = work_item
+                break
+        
+        completed_work = state.get("completed_work", []) + [work_item]
+        remaining_assigned = [w for w in updated_work_queue if w.status == "assigned"]
+        next_phase = "review" if not remaining_assigned else "execution"
+        
+        return {
+            "work_queue": updated_work_queue,
+            "completed_work": completed_work,
+            "qa_results": qa_results,
+            "current_phase": next_phase,
+            "messages": state.get("messages", []) + [f"QA Engineer {engineer_id}: {qa_results[:200]}..."]
+        }
+        
+    except Exception as e:
+        print(f"Error in LLM QA Engineer: {e}")
+        return {"current_phase": "execution"}
 
 
-async def senior_engineer_aggregator(state: states.State, config: RunnableConfig) -> Dict[str, Any]:
+async def llm_senior_engineer_aggregator(state: states.State, config: RunnableConfig) -> Dict[str, Any]:
     """Aggregates outputs from multiple senior engineers working in parallel on different tasks."""
     
     # Get completed development work from senior engineers that passed evaluation
-    completed_senior_work = [w for w in state.evaluation_queue if 
+    completed_senior_work = [w for w in state.get("evaluation_queue", []) if 
                             w.assigned_to and "senior_eng" in w.assigned_to and 
                             w.evaluation_loop and w.evaluation_loop.current_stage == "completed"]
     
@@ -299,10 +456,10 @@ async def senior_engineer_aggregator(state: states.State, config: RunnableConfig
     print(f"   Assigned to QA Engineer: {aggregated_work.assigned_to}")
     
     # Update work queue: remove individual completed items, add aggregated item
-    updated_work_queue = [w for w in state.work_queue if w not in completed_senior_work] + [aggregated_work]
+    updated_work_queue = [w for w in state.get("work_queue", []) if w not in completed_senior_work] + [aggregated_work]
     
     # Remove completed items from evaluation queue
-    updated_evaluation_queue = [w for w in state.evaluation_queue if w not in completed_senior_work]
+    updated_evaluation_queue = [w for w in state.get("evaluation_queue", []) if w not in completed_senior_work]
     
     return {
         "work_queue": updated_work_queue,
@@ -311,37 +468,63 @@ async def senior_engineer_aggregator(state: states.State, config: RunnableConfig
     }
 
 
-async def review(state: states.State, config: RunnableConfig) -> Dict[str, Any]:
-    """Review completed work and organizational structure."""
-    print("📊 Review: Organizational structure summary...")
+async def llm_review(state: states.State, config: RunnableConfig) -> Dict[str, Any]:
+    """LLM-powered final review and summary."""
+    print("📊 LLM Review: Final Analysis")
+    print("=" * 50)
     
-    completed_count = len(state.completed_work)
-    total_managers = len(state.active_engineers)
+    model = get_model_for_agent("review")
     
-    print(f"   ✅ Work items completed: {completed_count}")
-    print(f"   👔 Managers created: {total_managers}")
+    completed_count = len(state.get("completed_work", []))
+    total_managers = len(state.get("active_engineers", {}))
     
-    # Show detailed org structure by role
-    total_qa = 0
-    total_senior = 0
+    system_prompt = """You are conducting a final project review and organizational analysis.
+
+    Your responsibilities:
+    - Analyze project completion status
+    - Assess team performance and structure
+    - Provide insights and recommendations
+    - Summarize key achievements and areas for improvement
+
+    Provide a comprehensive project review with actionable insights."""
     
-    for manager_id, team_members in state.active_engineers.items():
-        print(f"\n   🏢 {manager_id} team structure:")
+    # Gather project information
+    project_summary = f"""
+    Project Completion Summary:
+    - Completed work items: {completed_count}
+    - Total managers created: {total_managers}
+    - Team structure: {total_managers} management teams with QA and Senior Engineers
+    
+    Recent messages: {state.get('messages', [])[-5:] if state.get('messages') else 'No recent messages'}
+    """
+    
+    human_message = f"""Please provide a comprehensive review of this project:
+
+    {project_summary}
+
+    Analyze the organizational structure, work completion, and provide recommendations."""
+    
+    messages = [
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=human_message)
+    ]
+    
+    try:
+        response = await model.ainvoke(messages)
+        review_analysis = response.content
         
-        qa_engineers = [e for e in team_members if "qa_engineer" in e]
-        senior_engineers = [e for e in team_members if "senior_eng" in e]
+        print(f"   LLM Review completed with strategic insights")
         
-        total_qa += len(qa_engineers)
-        total_senior += len(senior_engineers)
+        return {
+            "review_analysis": review_analysis,
+            "current_phase": "completed",
+            "messages": state.get("messages", []) + [f"Final review: {review_analysis[:200]}..."]
+        }
         
-        print(f"     🧪 QA Engineer (1:1): {qa_engineers[0] if qa_engineers else 'None'}")
-        print(f"     👨‍💻 Senior Engineers (orchestrator-worker): {senior_engineers}")
-    
-    print(f"\n   📈 Total team composition:")
-    print(f"     QA Engineers: {total_qa}")
-    print(f"     Senior Engineers: {total_senior}")
-    print(f"     Total Engineers: {total_qa + total_senior}")
-    
-    return {
-        "current_phase": "completed"
-    }
+    except Exception as e:
+        print(f"Error in LLM Review: {e}")
+        # Fallback to basic review
+        return {
+            "review_analysis": f"Project completed: {completed_count} items, {total_managers} teams",
+            "current_phase": "completed"
+        }

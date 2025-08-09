@@ -1,6 +1,7 @@
-"""LangGraph Organizational Structure with Human-in-the-Loop.
+"""LangGraph Organizational Structure with LLM-Powered Agents and Human-in-the-Loop.
 
-Main graph definition orchestrating:
+Enhanced graph definition orchestrating:
+- LLM-powered agents with model hierarchies and rate limiting
 - Human goal setting and escalation
 - Organizational hierarchy and delegation patterns
 - Evaluator-optimizer pattern with quality gates
@@ -22,15 +23,20 @@ if current_dir not in sys.path:
 # Import all modules
 from states import State
 
+# Import LLM-powered agents
 from agents import (
-    human_goal_setting, cto, engineering_manager, 
-    senior_engineer, qa_engineer, senior_engineer_aggregator, review
+    llm_human_goal_setting, llm_cto, llm_engineering_manager, 
+    llm_senior_engineer, llm_qa_engineer, llm_senior_engineer_aggregator, llm_review
 )
+
+# Import evaluators (keeping original for now)
 from evaluators import (
     unit_test_evaluator, self_review_evaluator, peer_review_evaluator,
     integration_test_evaluator, manager_review_evaluator, 
     cto_review_evaluator, human_escalation_evaluator
 )
+
+# Import routing logic
 from routing import (
     should_continue_with_managers, should_continue_with_engineers, 
     should_continue_with_evaluation
@@ -38,7 +44,7 @@ from routing import (
 
 
 class Configuration(TypedDict):
-    """Configurable parameters for organizational structure.
+    """Configurable parameters for organizational structure with LLM integration.
 
     Set these when creating assistants OR when invoking the graph.
     See: https://langchain-ai.github.io/langgraph/cloud/how-tos/configuration_cloud/
@@ -48,17 +54,18 @@ class Configuration(TypedDict):
     max_senior_engineers_per_manager: int
 
 
-# Define the graph with proper organizational structure, evaluation pipeline, and human-in-the-loop
-graph = (
+# Define the LLM-powered graph with proper organizational structure, evaluation pipeline, and human-in-the-loop
+llm_graph = (
     StateGraph(State, config_schema=Configuration)
-    .add_node("human_goal_setting", human_goal_setting)
-    .add_node("cto", cto)
-    .add_node("engineering_manager", engineering_manager)
-    .add_node("senior_engineer", senior_engineer)
-    .add_node("senior_engineer_aggregator", senior_engineer_aggregator)
-    .add_node("qa_engineer", qa_engineer)
+    # LLM-powered core agents
+    .add_node("human_goal_setting", llm_human_goal_setting)
+    .add_node("cto", llm_cto)
+    .add_node("engineering_manager", llm_engineering_manager)
+    .add_node("senior_engineer", llm_senior_engineer)
+    .add_node("senior_engineer_aggregator", llm_senior_engineer_aggregator)
+    .add_node("qa_engineer", llm_qa_engineer)
     
-    # Evaluator-Optimizer Pattern Nodes
+    # Evaluator-Optimizer Pattern Nodes (keeping original evaluators for now)
     .add_node("evaluation", lambda state: {"current_phase": "evaluation"})  # Evaluation entry point
     .add_node("unit_test_evaluator", unit_test_evaluator)
     .add_node("self_review_evaluator", self_review_evaluator)
@@ -68,13 +75,13 @@ graph = (
     .add_node("cto_review_evaluator", cto_review_evaluator)
     .add_node("human_escalation_evaluator", human_escalation_evaluator)  # Human-in-the-loop escalation
     
-    .add_node("review", review)
+    .add_node("review", llm_review)
     
-    # Human-in-the-loop flow: start with human goal setting
+    # Human-in-the-loop flow: start with LLM-enhanced human goal setting
     .add_edge("__start__", "human_goal_setting")
     .add_edge("human_goal_setting", "cto")
     
-    # CTO -> Engineering Managers (orchestrator-worker pattern)
+    # LLM CTO -> Engineering Managers (orchestrator-worker pattern)
     .add_conditional_edges(
         "cto",
         should_continue_with_managers,
@@ -84,7 +91,7 @@ graph = (
         }
     )
     
-    # Loop for multiple managers (parallel delegation - each works on different manager tasks)
+    # Loop for multiple LLM managers (parallel delegation - each works on different manager tasks)
     .add_conditional_edges(
         "engineering_manager",
         should_continue_with_managers,
@@ -94,46 +101,46 @@ graph = (
         }
     )
     
-    # Engineering Manager -> Engineers (parallel execution patterns)
+    # LLM Engineering Manager -> Engineers (parallel execution patterns)
     .add_conditional_edges(
         "engineering_manager",
         should_continue_with_engineers,
         {
-            "senior_engineer": "senior_engineer",           # Multiple senior engineers work in parallel on different dev tasks
-            "senior_engineer_aggregator": "senior_engineer_aggregator",  # Combines parallel senior engineer outputs
-            "qa_engineer": "qa_engineer",                   # QA tests aggregated outputs
+            "senior_engineer": "senior_engineer",           # Multiple LLM senior engineers work in parallel
+            "senior_engineer_aggregator": "senior_engineer_aggregator",  # Combines parallel outputs
+            "qa_engineer": "qa_engineer",                   # LLM QA tests aggregated outputs
             "evaluation": "evaluation",
             "review": "review"
         }
     )
     
-    # Senior Engineers (parallel workers on different development tasks)
+    # LLM Senior Engineers (parallel workers on different development tasks)
     .add_conditional_edges(
         "senior_engineer",
         should_continue_with_engineers,
         {
             "senior_engineer": "senior_engineer",           # Continue parallel processing
-            "senior_engineer_aggregator": "senior_engineer_aggregator",  # Aggregate when multiple outputs ready
+            "senior_engineer_aggregator": "senior_engineer_aggregator",  # Aggregate when outputs ready
             "qa_engineer": "qa_engineer",
             "evaluation": "evaluation",
             "review": "review"
         }
     )
     
-    # Senior Engineer Aggregator (synthesizes parallel outputs into single deliverable)
+    # LLM Senior Engineer Aggregator (synthesizes parallel outputs)
     .add_conditional_edges(
         "senior_engineer_aggregator",
         should_continue_with_engineers,
         {
             "senior_engineer": "senior_engineer",
             "senior_engineer_aggregator": "senior_engineer_aggregator",
-            "qa_engineer": "qa_engineer",                   # Route to QA for testing aggregated deliverable
+            "qa_engineer": "qa_engineer",                   # Route to LLM QA for testing
             "evaluation": "evaluation",
             "review": "review"
         }
     )
     
-    # QA Engineers (1:1 pattern)
+    # LLM QA Engineers (1:1 pattern)
     .add_conditional_edges(
         "qa_engineer",
         should_continue_with_engineers,
@@ -276,10 +283,12 @@ graph = (
         }
     )
     
-    # End at review
+    # End at LLM review
     .add_edge("review", END)
 )
 
-# Compile the graph
+# Compile the LLM-powered graph
 # Note: LangGraph Studio provides built-in persistence for human-in-the-loop functionality
-graph = graph.compile()
+graph = llm_graph.compile()
+
+__all__ = ["graph", "llm_graph", "Configuration"]
