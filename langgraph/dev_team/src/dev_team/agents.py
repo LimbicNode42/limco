@@ -64,43 +64,92 @@ async def llm_human_goal_setting(state: states.State, config: RunnableConfig) ->
 
 
 async def llm_cto(state: states.State, config: RunnableConfig) -> Dict[str, Any]:
-    """LLM-powered CTO for strategic planning and work breakdown."""
-    print("👔 LLM CTO: Strategic Planning & Architecture")
-    print("=" * 50)
+    """LLM-powered CTO for strategic planning, complexity analysis, and dynamic team sizing."""
+    print("🎯 LLM CTO: Strategic Planning & Dynamic Team Sizing")
+    print("=" * 60)
     
     model = get_model_for_agent("cto")
     tools = get_all_tools()
-    
-    # Bind tools to model for potential handoffs
     model_with_tools = model.bind_tools(tools)
     
-    configuration = config.get("configurable", {})
-    max_managers = configuration.get("max_managers", 3)
+    # Import complexity analyzer
+    from complexity_analyzer import assess_project_complexity, create_iteration_manager
     
-    project_goals = state.get("project_goals", "No specific goals provided")
+    project_goals = state.get("project_goals", "No goals specified")
+    existing_work_context = ""
+    if state.get("work_queue"):
+        existing_work_context = f"Existing work context: {len(state.get('work_queue', []))} items in queue"
     
-    system_prompt = f"""You are a CTO responsible for strategic planning and work breakdown.
+    print(f"   📊 Analyzing project complexity for: {project_goals[:100]}...")
+    
+    # Perform complexity analysis
+    try:
+        complexity_assessment = await assess_project_complexity(
+            project_goals=project_goals,
+            work_context=existing_work_context,
+            config=config
+        )
+        
+        print(f"   🧠 Complexity Analysis Complete:")
+        print(f"      Overall Score: {complexity_assessment.overall_score:.1f}/10.0")
+        print(f"      Recommended Managers: {complexity_assessment.recommended_managers}")
+        print(f"      Engineers per Manager: {complexity_assessment.recommended_engineers_per_manager}")
+        print(f"      Total Workers: {complexity_assessment.total_recommended_workers}")
+        
+        # Update team structure in state
+        team_structure = states.ComplexityBasedTeamStructure(
+            recommended_managers=complexity_assessment.recommended_managers,
+            recommended_engineers_per_manager=complexity_assessment.recommended_engineers_per_manager,
+            total_recommended_workers=complexity_assessment.total_recommended_workers,
+            complexity_score=complexity_assessment.overall_score,
+            requires_iteration=complexity_assessment.requires_iteration,
+            iteration_strategy=complexity_assessment.iteration_strategy,
+            analysis_reasoning=complexity_assessment.reasoning
+        )
+        
+    except Exception as e:
+        print(f"   ⚠️  Complexity analysis failed, using defaults: {e}")
+        # Fallback to conservative defaults
+        team_structure = states.ComplexityBasedTeamStructure(
+            recommended_managers=1,
+            recommended_engineers_per_manager=2,
+            total_recommended_workers=3,
+            complexity_score=5.0,
+            analysis_reasoning="Fallback due to analysis error"
+        )
+    
+    # Create strategic plan with complexity insights
+    system_prompt = f"""You are a Chief Technology Officer responsible for strategic planning and work breakdown.
 
     Your responsibilities:
-    - Analyze project requirements and create strategic plans
-    - Break down work into manageable components
-    - Create technical architecture decisions
-    - Delegate work to engineering managers
-    - Make escalation decisions when needed
+    - Analyze project objectives and create strategic direction
+    - Break down high-level goals into specific work items  
+    - Consider technical complexity and resource requirements
+    - Plan optimal team structure based on complexity analysis
+    - Create clear, actionable work packages
 
-    You have access to handoff tools to delegate work or escalate decisions.
-    You need to create {max_managers} manager assignments.
-
-    Current project goals: {project_goals}
+    COMPLEXITY ANALYSIS RESULTS:
+    - Overall Complexity: {team_structure.complexity_score:.1f}/10.0
+    - Recommended Team Size: {team_structure.total_recommended_workers} workers
+    - Team Structure: {team_structure.recommended_managers} managers, {team_structure.recommended_engineers_per_manager} engineers each
+    - Reasoning: {team_structure.analysis_reasoning}
     
-    Provide a strategic analysis and create specific work items for the engineering team."""
+    Use this analysis to inform your strategic planning and work breakdown.
+    Create work items that align with the recommended team structure.
+    """
     
-    human_message = f"""Please analyze these project goals and create a strategic plan with work breakdown:
+    human_message = f"""Please create a strategic plan and work breakdown for this project:
 
-    {project_goals}
+PROJECT GOALS: {project_goals}
 
-    Create {max_managers} distinct work areas that can be managed by different engineering managers."""
-    
+Based on the complexity analysis, create {3 + team_structure.recommended_managers} strategic work items that can be effectively handled by the recommended team structure of {team_structure.total_recommended_workers} workers.
+
+Focus on work items that:
+1. Align with the complexity assessment
+2. Can be distributed across {team_structure.recommended_managers} management teams  
+3. Leverage the strengths of {team_structure.recommended_engineers_per_manager} engineers per team
+4. Account for the overall complexity score of {team_structure.complexity_score:.1f}/10.0"""
+
     messages = [
         SystemMessage(content=system_prompt),
         HumanMessage(content=human_message)
@@ -110,107 +159,234 @@ async def llm_cto(state: states.State, config: RunnableConfig) -> Dict[str, Any]
         response = await model_with_tools.ainvoke(messages)
         strategic_analysis = response.content
         
-        # Create work items based on LLM analysis
-        work_items = [
-            states.WorkItem(
-                id="work_1",
-                title="Core AI/ML Implementation", 
-                description=f"Implement core AI functionality based on strategic analysis: {strategic_analysis[:200]}...",
-                priority=3,
-                created_by="llm_cto"
-            ),
-            states.WorkItem(
-                id="work_2",
-                title="Integration & API Layer",
-                description=f"Build integration components as per strategic plan: {strategic_analysis[200:400]}...",
-                priority=2,
-                created_by="llm_cto"
-            ),
-            states.WorkItem(
-                id="work_3", 
-                title="Testing & Quality Framework",
-                description=f"Comprehensive testing strategy: {strategic_analysis[400:600]}...",
-                priority=4,
-                created_by="llm_cto"
-            ),
-            states.WorkItem(
-                id="work_4",
-                title="Documentation & Deployment",
-                description=f"Documentation and deployment pipeline: {strategic_analysis[600:800]}...",
-                priority=1,
-                created_by="llm_cto"
-            )
-        ]
+        print(f"   📋 Strategic Analysis Generated:")
+        print(f"      Length: {len(strategic_analysis)} characters")
         
-        manager_ids = [f"manager_{i}" for i in range(max_managers)]
-        print(f"   LLM CTO created strategic plan and {len(manager_ids)} manager assignments")
+        # Create work items based on complexity and team structure
+        base_work_count = 3 + team_structure.recommended_managers
+        
+        work_items = []
+        for i in range(base_work_count):
+            # Vary priority based on complexity and position
+            if team_structure.complexity_score >= 8.0:
+                priority = 5 if i == 0 else (4 if i == 1 else 3)
+            elif team_structure.complexity_score >= 6.0:
+                priority = 4 if i == 0 else (3 if i == 1 else 2)  
+            else:
+                priority = 3 if i == 0 else 2
+            
+            work_item = states.WorkItem(
+                id=f"work_{i+1}",
+                title=f"Strategic Component #{i+1}",
+                description=f"Work package based on strategic analysis: {strategic_analysis[i*200:(i+1)*200]}...",
+                priority=priority,
+                created_by="llm_cto",
+                iteration_batch=0  # Start with iteration 0
+            )
+            work_items.append(work_item)
+        
+        # Setup iteration state if needed
+        iteration_state = states.IterationState()
+        if team_structure.requires_iteration:
+            print(f"   🔄 Setting up iteration strategy: {team_structure.iteration_strategy}")
+            iteration_manager = create_iteration_manager()
+            
+            # Plan iterations based on work items and team constraints
+            configuration = config.get("configurable", {})
+            from complexity_analyzer import ResourceLimits
+            limits = ResourceLimits(
+                max_managers=configuration.get("max_managers", 3),
+                max_engineers_per_manager=configuration.get("max_engineers_per_manager", 3), 
+                max_total_workers=configuration.get("max_total_workers", 9)
+            )
+            
+            work_batches = iteration_manager.plan_iterations(work_items, limits, team_structure.total_recommended_workers)
+            
+            # Update work items with iteration batch numbers
+            for batch_idx, batch in enumerate(work_batches):
+                for work_item in batch:
+                    work_item.iteration_batch = batch_idx
+            
+            iteration_state = states.IterationState(
+                is_iterative=True,
+                current_iteration=0,
+                total_iterations=len(work_batches),
+                iteration_work_batches=[[w.id for w in batch] for batch in work_batches]
+            )
+        
+        # Create manager assignments based on team structure
+        manager_ids = [f"manager_{i}" for i in range(team_structure.recommended_managers)]
+        
+        print(f"   👥 Team Structure Created:")
+        print(f"      Managers: {len(manager_ids)} ({', '.join(manager_ids)})")
+        print(f"      Engineers per Manager: {team_structure.recommended_engineers_per_manager}")
+        print(f"      Iteration Planning: {'Yes' if iteration_state.is_iterative else 'No'}")
+        if iteration_state.is_iterative:
+            print(f"      Total Iterations: {iteration_state.total_iterations}")
         
         return {
             "work_queue": work_items,
             "active_managers": manager_ids,
+            "team_structure": team_structure,
+            "iteration_state": iteration_state,
             "strategic_analysis": strategic_analysis,
             "current_phase": "delegation",
-            "messages": state.get("messages", []) + [f"CTO strategic analysis: {strategic_analysis[:200]}..."]
+            "messages": state.get("messages", []) + [f"CTO strategic analysis with {team_structure.complexity_score:.1f}/10 complexity: {strategic_analysis[:200]}..."]
         }
         
     except Exception as e:
         print(f"Error in LLM CTO: {e}")
-        # Fallback to basic work items
+        # Fallback to basic structure
+        fallback_team = states.ComplexityBasedTeamStructure()
         return {
             "work_queue": [
                 states.WorkItem(id="work_1", title="Basic Development", description="Basic development work", priority=2, created_by="cto_fallback")
             ],
             "active_managers": ["manager_0"],
+            "team_structure": fallback_team,
+            "iteration_state": states.IterationState(),
             "current_phase": "delegation"
         }
 
 
+async def llm_iteration_manager(state: states.State, config: RunnableConfig) -> Dict[str, Any]:
+    """Manages iteration transitions and state updates for multi-iteration workflows."""
+    print("🔄 LLM Iteration Manager: Managing Iteration Transitions")
+    print("=" * 60)
+    
+    iteration_state = state.get("iteration_state", states.IterationState())
+    
+    if not iteration_state.is_iterative:
+        print("   ❌ Not in iterative mode, skipping iteration management")
+        return {"current_phase": "review"}
+    
+    # Record results from current iteration
+    current_iteration = iteration_state.current_iteration
+    completed_work = [w for w in state.get("completed_work", []) 
+                     if w.iteration_batch == current_iteration]
+    
+    iteration_result = {
+        "iteration": current_iteration + 1,
+        "completed_work": completed_work,
+        "summary": f"Iteration {current_iteration + 1} completed {len(completed_work)} work items"
+    }
+    
+    # Update iteration state
+    updated_iteration_state = states.IterationState(
+        is_iterative=iteration_state.is_iterative,
+        current_iteration=current_iteration + 1,
+        total_iterations=iteration_state.total_iterations,
+        iteration_work_batches=iteration_state.iteration_work_batches,
+        iteration_results=iteration_state.iteration_results + [iteration_result],
+        iteration_summaries=iteration_state.iteration_summaries + [iteration_result["summary"]]
+    )
+    
+    # Check if we have more iterations
+    if updated_iteration_state.current_iteration >= updated_iteration_state.total_iterations:
+        print(f"   ✅ All iterations complete ({updated_iteration_state.total_iterations})")
+        return {
+            "iteration_state": updated_iteration_state,
+            "current_phase": "review",
+            "messages": state.get("messages", []) + [f"All {updated_iteration_state.total_iterations} iterations completed"]
+        }
+    
+    print(f"   ➡️  Advancing to iteration {updated_iteration_state.current_iteration + 1}/{updated_iteration_state.total_iterations}")
+    
+    # Reset manager state for next iteration
+    team_structure = state.get("team_structure", states.ComplexityBasedTeamStructure())
+    manager_ids = [f"manager_{i}" for i in range(team_structure.recommended_managers)]
+    
+    # Reset work items status for next iteration
+    next_batch_ids = (updated_iteration_state.iteration_work_batches[updated_iteration_state.current_iteration]
+                     if updated_iteration_state.current_iteration < len(updated_iteration_state.iteration_work_batches)
+                     else [])
+    
+    updated_work_queue = state.get("work_queue", []).copy()
+    for work_item in updated_work_queue:
+        if work_item.id in next_batch_ids:
+            work_item.status = "pending"
+            work_item.assigned_to = None
+    
+    return {
+        "iteration_state": updated_iteration_state,
+        "active_managers": manager_ids,
+        "active_engineers": {},  # Reset engineer assignments
+        "work_queue": updated_work_queue,
+        "current_phase": "delegation",
+        "messages": state.get("messages", []) + [f"Iteration {updated_iteration_state.current_iteration + 1} started with {len(next_batch_ids)} work items"]
+    }
+
+
 async def llm_engineering_manager(state: states.State, config: RunnableConfig) -> Dict[str, Any]:
-    """LLM-powered Engineering Manager for team coordination and task delegation."""
-    print("👨‍💼 LLM Engineering Manager: Team Coordination")
-    print("=" * 50)
+    """LLM-powered Engineering Manager for team coordination with dynamic team sizing."""
+    print("👨‍💼 LLM Engineering Manager: Dynamic Team Coordination")
+    print("=" * 60)
     
     model = get_model_for_agent("engineering_manager")
     tools = get_all_tools()
     model_with_tools = model.bind_tools(tools)
     
-    configuration = config.get("configurable", {})
-    max_senior_engineers = configuration.get("max_senior_engineers_per_manager", 2)
+    # Get team structure from state
+    team_structure = state.get("team_structure", states.ComplexityBasedTeamStructure())
+    iteration_state = state.get("iteration_state", states.IterationState())
+    
+    print(f"   📊 Using Dynamic Team Structure:")
+    print(f"      Managers: {team_structure.recommended_managers}")
+    print(f"      Engineers per Manager: {team_structure.recommended_engineers_per_manager}")
+    print(f"      Complexity Score: {team_structure.complexity_score:.1f}/10.0")
     
     if not state.get("active_managers", []):
         return {"current_phase": "execution"}
     
     current_manager = state.get("active_managers", [])[0]
-    available_work = [w for w in state.get("work_queue", []) if w.status == "pending"]
+    
+    # Filter work for current iteration if using iterations
+    available_work = []
+    if iteration_state.is_iterative:
+        current_batch_ids = iteration_state.iteration_work_batches[iteration_state.current_iteration] if iteration_state.current_iteration < len(iteration_state.iteration_work_batches) else []
+        available_work = [w for w in state.get("work_queue", []) if w.status == "pending" and w.id in current_batch_ids]
+        print(f"   🔄 Iteration {iteration_state.current_iteration + 1}/{iteration_state.total_iterations}")
+        print(f"      Work items in current batch: {len(available_work)}")
+    else:
+        available_work = [w for w in state.get("work_queue", []) if w.status == "pending"]
     
     if not available_work:
+        print("   ⚠️  No available work for current manager")
         return {"current_phase": "execution"}
     
     system_prompt = f"""You are an Engineering Manager responsible for team building and work delegation.
 
+    TEAM STRUCTURE (Based on Complexity Analysis):
+    - Complexity Score: {team_structure.complexity_score:.1f}/10.0
+    - Engineers per Manager: {team_structure.recommended_engineers_per_manager}
+    - Analysis Reasoning: {team_structure.analysis_reasoning}
+    
     Your responsibilities:
-    - Build balanced engineering teams
-    - Delegate work based on engineer specializations
+    - Build balanced engineering teams based on complexity analysis
+    - Delegate work based on engineer specializations and team capacity
     - Coordinate between team members
     - Ensure work is properly distributed
-    - Use handoff tools to assign work to specific engineers
+    - Use the recommended team size for optimal performance
 
     You can create teams with:
     - 1 QA Engineer (for testing and quality assurance)
-    - {max_senior_engineers} Senior Engineers (for development work)
+    - {team_structure.recommended_engineers_per_manager} Senior Engineers (for development work)
 
     Available work items: {[w.title for w in available_work]}
     Current manager: {current_manager}
-
-    Analyze the work and create appropriate team assignments."""
     
-    work_descriptions = "\n".join([f"- {w.title}: {w.description}" for w in available_work[:3]])
+    {'ITERATION MODE: Working on batch ' + str(iteration_state.current_iteration + 1) + ' of ' + str(iteration_state.total_iterations) if iteration_state.is_iterative else 'SINGLE ITERATION MODE'}
+
+    Analyze the work and create appropriate team assignments based on the complexity-driven team structure."""
+    
+    work_descriptions = "\n".join([f"- {w.title}: {w.description}" for w in available_work[:5]])
     
     human_message = f"""Please analyze this work and create team assignments:
 
     {work_descriptions}
 
-    Create a team structure and assign work appropriately between QA and Senior Engineers."""
+    Create a team structure with {team_structure.recommended_engineers_per_manager} engineers and assign work appropriately.
+    Consider the complexity score of {team_structure.complexity_score:.1f}/10.0 when making assignments."""
     
     messages = [
         SystemMessage(content=system_prompt),
@@ -221,38 +397,55 @@ async def llm_engineering_manager(state: states.State, config: RunnableConfig) -
         response = await model_with_tools.ainvoke(messages)
         delegation_plan = response.content
         
-        # Create team structure
+        # Create team structure based on complexity analysis
         qa_engineer = f"{current_manager}_qa_engineer"
-        senior_engineer_ids = [f"{current_manager}_senior_eng_{i}" for i in range(max_senior_engineers)]
+        senior_engineer_ids = [f"{current_manager}_senior_eng_{i}" for i in range(team_structure.recommended_engineers_per_manager)]
         team_members = [qa_engineer] + senior_engineer_ids
         
-        # Assign work based on LLM recommendations
-        manager_work = available_work[:3]
+        print(f"   👥 Creating Team for {current_manager}:")
+        print(f"      QA Engineer: {qa_engineer}")
+        print(f"      Senior Engineers: {', '.join(senior_engineer_ids)}")
+        
+        # Assign work based on LLM recommendations and team capacity
+        max_work_items = min(len(available_work), len(team_members))
+        manager_work = available_work[:max_work_items]
+        
         for i, work_item in enumerate(manager_work):
             if i == 0:
                 # First item to QA Engineer
                 work_item.assigned_to = qa_engineer
                 work_item.status = "assigned"
-                print(f"   LLM assigned '{work_item.title}' to QA Engineer: {qa_engineer}")
+                print(f"   📋 Assigned '{work_item.title}' to QA Engineer: {qa_engineer}")
             else:
-                # Remaining to Senior Engineers
-                assigned_engineer = senior_engineer_ids[(i-1) % len(senior_engineer_ids)]
+                # Distribute remaining work to Senior Engineers
+                engineer_index = (i - 1) % len(senior_engineer_ids)
+                assigned_engineer = senior_engineer_ids[engineer_index]
                 work_item.assigned_to = assigned_engineer
                 work_item.status = "assigned"
-                print(f"   LLM assigned '{work_item.title}' to Senior Engineer: {assigned_engineer}")
+                print(f"   📋 Assigned '{work_item.title}' to Senior Engineer: {assigned_engineer}")
         
+        # Update state
         updated_work_queue = [w for w in state.get("work_queue", []) if w not in manager_work] + manager_work
         updated_active_engineers = state.get("active_engineers", {}).copy()
         updated_active_engineers[current_manager] = team_members
         remaining_managers = state.get("active_managers", [])[1:]
+        
+        # Check for iteration advancement
+        next_phase = "execution" if not remaining_managers else "delegation"
+        
+        # Handle iteration completion
+        if iteration_state.is_iterative and not remaining_managers:
+            if iteration_state.current_iteration + 1 < iteration_state.total_iterations:
+                print(f"   🔄 Iteration {iteration_state.current_iteration + 1} complete, {iteration_state.total_iterations - iteration_state.current_iteration - 1} remaining")
+                # Will need iteration management in routing
         
         return {
             "work_queue": updated_work_queue,
             "active_managers": remaining_managers,
             "active_engineers": updated_active_engineers,
             "delegation_plan": delegation_plan,
-            "current_phase": "execution" if not remaining_managers else "delegation",
-            "messages": state.get("messages", []) + [f"Engineering Manager delegation: {delegation_plan[:200]}..."]
+            "current_phase": next_phase,
+            "messages": state.get("messages", []) + [f"Engineering Manager ({team_structure.recommended_engineers_per_manager} engineers): {delegation_plan[:200]}..."]
         }
         
     except Exception as e:
@@ -286,10 +479,18 @@ async def llm_senior_engineer(state: states.State, config: RunnableConfig) -> Di
     - Write high-quality code
     - Ensure proper testing coverage
     - Use handoff tools when work is ready for QA or needs peer review
+    - IMPORTANT: If you encounter access limitations, missing credentials, or capability gaps, clearly identify them in your response
 
     Current assignment: {work_item.title}
     Description: {work_item.description}
     Engineer ID: {engineer_id}
+
+    If you encounter any of these issues, clearly state them:
+    - Missing credentials or API keys
+    - Insufficient access permissions
+    - Missing tools or software
+    - Platform/service unavailability
+    - Need for approvals or escalations
 
     Provide a detailed technical implementation plan and mark work for evaluation."""
     
@@ -308,6 +509,60 @@ async def llm_senior_engineer(state: states.State, config: RunnableConfig) -> Di
     try:
         response = await model_with_tools.ainvoke(messages)
         implementation_details = response.content
+        
+        # Check for capability gaps in the response
+        import human_assistance
+        
+        capability_keywords = [
+            "access denied", "unauthorized", "missing credentials", "insufficient permissions",
+            "tool not available", "platform unavailable", "need approval", "escalation required",
+            "cannot access", "missing api key", "authentication failed", "permission denied"
+        ]
+        
+        has_capability_gap = any(keyword in implementation_details.lower() for keyword in capability_keywords)
+        
+        if has_capability_gap:
+            print(f"   ⚠️  Capability gap detected in {engineer_id}'s work")
+            
+            # Identify specific gaps
+            gaps = human_assistance.identify_capability_gaps(implementation_details, work_item.description)
+            
+            if gaps:
+                # Create assistance request for the primary gap
+                primary_gap = gaps[0]  # Take the first identified gap
+                
+                assistance_request = human_assistance.create_assistance_request(
+                    work_item_id=work_item.id,
+                    engineer_id=engineer_id,
+                    request_type=primary_gap.gap_type.replace("missing_", "").replace("insufficient_", "").replace("_", " "),
+                    title=f"Access/Capability Issue: {work_item.title}",
+                    description=f"Engineer {engineer_id} encountered capability gap: {primary_gap.description}",
+                    urgency=primary_gap.impact_level,
+                    required_capabilities=[primary_gap.resource_name],
+                    blocked_tasks=[work_item.title],
+                    suggested_solution=primary_gap.alternative_description if primary_gap.alternative_available else None
+                )
+                
+                # Mark work as blocked pending human assistance
+                work_item.status = "blocked"
+                work_item.result = f"BLOCKED - Capability gap detected by {engineer_id}: {implementation_details}"
+                
+                updated_work_queue = state.get("work_queue", []).copy()
+                for i, w in enumerate(updated_work_queue):
+                    if w.id == work_item.id:
+                        updated_work_queue[i] = work_item
+                        break
+                
+                updated_requests = state.get("human_assistance_requests", []) + [assistance_request]
+                
+                return {
+                    "work_queue": updated_work_queue,
+                    "human_assistance_requests": updated_requests,
+                    "pending_human_intervention": True,
+                    "current_phase": "human_assistance",
+                    "implementation_details": f"Capability gap detected: {implementation_details}",
+                    "messages": state.get("messages", []) + [f"Senior Engineer {engineer_id}: Capability gap detected, human assistance requested"]
+                }
         
         print(f"   LLM Senior Engineer {engineer_id} completed: {work_item.title}")
         
@@ -528,3 +783,132 @@ async def llm_review(state: states.State, config: RunnableConfig) -> Dict[str, A
             "review_analysis": f"Project completed: {completed_count} items, {total_managers} teams",
             "current_phase": "completed"
         }
+
+
+async def llm_human_assistance_coordinator(state: states.State, config: RunnableConfig) -> Dict[str, Any]:
+    """Coordinates human assistance requests and capability gap resolution."""
+    print("🤝 Human Assistance Coordinator: Processing Requests")
+    print("=" * 55)
+    
+    import human_assistance
+    
+    # Get pending assistance requests
+    pending_requests = human_assistance.get_pending_assistance_requests(state)
+    
+    if not pending_requests:
+        print("   No pending human assistance requests")
+        return {"current_phase": "execution", "pending_human_intervention": False}
+    
+    print(f"   Processing {len(pending_requests)} assistance request(s)")
+    
+    # Group requests by urgency
+    critical_requests = [r for r in pending_requests if r.urgency == "critical"]
+    high_requests = [r for r in pending_requests if r.urgency == "high"]
+    medium_requests = [r for r in pending_requests if r.urgency == "medium"]
+    low_requests = [r for r in pending_requests if r.urgency == "low"]
+    
+    # Format summary for human review
+    summary_parts = []
+    
+    if critical_requests:
+        summary_parts.append("🔴 CRITICAL REQUESTS:")
+        for req in critical_requests:
+            summary_parts.append(human_assistance.format_assistance_request_summary(req))
+    
+    if high_requests:
+        summary_parts.append("🟠 HIGH PRIORITY REQUESTS:")
+        for req in high_requests:
+            summary_parts.append(human_assistance.format_assistance_request_summary(req))
+    
+    if medium_requests:
+        summary_parts.append("🟡 MEDIUM PRIORITY REQUESTS:")
+        for req in medium_requests:
+            summary_parts.append(human_assistance.format_assistance_request_summary(req))
+    
+    if low_requests:
+        summary_parts.append("🟢 LOW PRIORITY REQUESTS:")
+        for req in low_requests:
+            summary_parts.append(human_assistance.format_assistance_request_summary(req))
+    
+    assistance_summary = "\n".join(summary_parts)
+    
+    # Mark as needing human intervention
+    print(f"   Assistance requests require human intervention")
+    print(f"   Summary prepared for human review")
+    
+    return {
+        "current_phase": "human_assistance",
+        "pending_human_intervention": True,
+        "messages": state.get("messages", []) + [f"Human Assistance Coordinator: {len(pending_requests)} requests pending human review"],
+        "implementation_details": state.get("implementation_details", "") + f"\n\nHUMAN ASSISTANCE REQUIRED:\n{assistance_summary}"
+    }
+
+
+async def llm_capability_gap_analyzer(state: states.State, config: RunnableConfig) -> Dict[str, Any]:
+    """Analyzes capability gaps and creates assistance requests when needed."""
+    print("🔍 Capability Gap Analyzer: Analyzing Limitations")
+    print("=" * 50)
+    
+    import human_assistance
+    
+    # Look for work items that might have capability gaps
+    problem_work = []
+    
+    # Check failed work items
+    for work_item in state.get("failed_work", []):
+        if work_item.result and any(keyword in work_item.result.lower() for keyword in 
+                                   ["error", "failed", "unauthorized", "access denied", "missing"]):
+            problem_work.append(work_item)
+    
+    # Check work items stuck in evaluation loops
+    for work_item in state.get("evaluation_queue", []):
+        if work_item.evaluation_loop.loop_count >= 2:  # Multiple failed attempts
+            problem_work.append(work_item)
+    
+    if not problem_work:
+        print("   No capability gaps detected")
+        return {"current_phase": state.get("current_phase", "execution")}
+    
+    print(f"   Analyzing {len(problem_work)} problematic work item(s)")
+    
+    new_requests = []
+    
+    for work_item in problem_work:
+        # Analyze the specific failure
+        error_context = work_item.result or "Multiple evaluation failures"
+        
+        # Identify capability gaps
+        gaps = human_assistance.identify_capability_gaps(error_context, work_item.description)
+        
+        if gaps:
+            print(f"   Found capability gaps in: {work_item.title}")
+            
+            # Create assistance request for the most critical gap
+            primary_gap = max(gaps, key=lambda g: ["low", "medium", "high", "critical"].index(g.impact_level))
+            
+            request = human_assistance.create_assistance_request(
+                work_item_id=work_item.id,
+                engineer_id=work_item.assigned_to or "unassigned",
+                request_type=primary_gap.gap_type.replace("_", " "),
+                title=f"Capability Gap: {primary_gap.resource_name}",
+                description=f"Work item '{work_item.title}' blocked by {primary_gap.description}",
+                urgency=primary_gap.impact_level,
+                required_capabilities=[primary_gap.resource_name],
+                blocked_tasks=[work_item.title],
+                suggested_solution=primary_gap.alternative_description if primary_gap.alternative_available else None
+            )
+            
+            new_requests.append(request)
+    
+    if new_requests:
+        updated_requests = state.get("human_assistance_requests", []) + new_requests
+        print(f"   Created {len(new_requests)} assistance request(s)")
+        
+        return {
+            "human_assistance_requests": updated_requests,
+            "pending_human_intervention": True,
+            "current_phase": "human_assistance",
+            "messages": state.get("messages", []) + [f"Capability Gap Analyzer: Created {len(new_requests)} assistance requests"]
+        }
+    
+    return {"current_phase": state.get("current_phase", "execution")}
