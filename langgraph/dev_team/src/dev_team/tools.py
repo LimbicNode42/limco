@@ -19,6 +19,18 @@ from langchain_tavily import TavilySearch
 from langchain_community.agent_toolkits.github.toolkit import GitHubToolkit
 from langchain_community.utilities.github import GitHubAPIWrapper
 
+# GitHub MCP Integration
+try:
+    from .github_mcp import GitHubMCPClient, create_github_mcp_tools, get_github_token
+except ImportError:
+    try:
+        from github_mcp import GitHubMCPClient, create_github_mcp_tools, get_github_token
+    except ImportError:
+        print("Warning: GitHub MCP integration not available - github_mcp module not found")
+        GitHubMCPClient = None
+        create_github_mcp_tools = None
+        get_github_token = None
+
 
 def safe_get_state_attr(state: states.State, key: str, default=None):
     """Safely get state attribute whether state is dict-like or object-like."""
@@ -1624,13 +1636,53 @@ def schedule_meeting(title: str, participants: List[str], duration_minutes: int 
 # TOOL COLLECTIONS FOR AGENT INITIALIZATION
 # =============================================================================
 
+async def get_github_mcp_tools():
+    """Get GitHub MCP tools asynchronously."""
+    if not create_github_mcp_tools or not get_github_token:
+        print("Warning: GitHub MCP integration not available")
+        return []
+    
+    try:
+        token = get_github_token()
+        # Focus on repository and issue management toolsets
+        toolsets = ["repos", "issues", "pull_requests", "context"]
+        tools = await create_github_mcp_tools(token, toolsets=toolsets)
+        return tools
+    except Exception as e:
+        print(f"Warning: Failed to load GitHub MCP tools: {e}")
+        return []
+
+
+def get_github_mcp_tools_sync():
+    """Get GitHub MCP tools synchronously (for use in get_all_tools)."""
+    if not create_github_mcp_tools or not get_github_token:
+        return []
+        
+    import asyncio
+    try:
+        # Check if we're in an async context
+        try:
+            loop = asyncio.get_running_loop()
+            # We're in an async context, use run_coroutine_threadsafe
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(asyncio.run, get_github_mcp_tools())
+                return future.result(timeout=10)
+        except RuntimeError:
+            # No running loop, we can use asyncio.run
+            return asyncio.run(get_github_mcp_tools())
+    except Exception as e:
+        print(f"Warning: Failed to load GitHub MCP tools synchronously: {e}")
+        return []
+
+
 def get_all_tools() -> List:
     """Get all available tools for agent initialization.
     
     Returns:
         List of all tool functions including handoff capabilities
     """
-    return [
+    base_tools = [
         # Agent Handoff & Collaboration (NEW!)
         transfer_to_qa_engineer, escalate_to_cto, request_peer_review,
         delegate_to_engineering_manager, transfer_to_senior_engineer, escalate_to_human,
@@ -1650,7 +1702,7 @@ def get_all_tools() -> List:
         # Code Development
         run_code, run_tests,
         
-        # GitHub Integration
+        # GitHub Integration (Traditional Toolkit)
         github_get_issues, github_get_issue, github_comment_on_issue,
         github_list_pull_requests, github_get_pull_request, github_create_pull_request,
         github_create_file, github_read_file, github_update_file, github_delete_file,
@@ -1664,6 +1716,17 @@ def get_all_tools() -> List:
         # Email & Communication (Leadership)
         send_email, schedule_meeting
     ]
+    
+    # Add GitHub MCP tools (enhanced GitHub integration)
+    try:
+        github_mcp_tools = get_github_mcp_tools_sync()
+        if github_mcp_tools:
+            base_tools.extend(github_mcp_tools)
+            print(f"Enhanced GitHub integration: Added {len(github_mcp_tools)} MCP tools")
+    except Exception as e:
+        print(f"Warning: Could not load GitHub MCP tools, using traditional toolkit only: {e}")
+    
+    return base_tools
 
 
 def get_tool_descriptions() -> Dict[str, str]:
