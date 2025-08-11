@@ -1,40 +1,16 @@
-"""Main tools module providing centralized access to all development team tools.
+"""Tools module for development team agents.
 
-This module serves as the central hub for all tools available to development team agents.
-Tools are organized by category in separate modules for better maintainability.
+This module provides a clean interface to all available tools organized by category.
 """
 
-from typing import List
-from .tools import (
-    # Agent Handoffs
-    transfer_to_qa_engineer, escalate_to_cto, request_peer_review,
-    delegate_to_engineering_manager, transfer_to_senior_engineer, escalate_to_human,
-    
-    # Research & Communication
-    web_search, web_search_news, web_search_academic,
-    
-    # Document Management
-    search_documents, create_document, update_document,
-    
-    # Database & Data
-    query_database, get_project_metrics,
-    
-    # Filesystem & Code
-    read_file, write_file, list_files,
-    
-    # Code Development & Quality
-    run_code, run_tests, run_static_analysis, run_security_scan,
-    run_code_quality_check, request_copilot_review,
-    
-    # Project Management
-    create_task, update_task_status, get_team_workload,
-    
-    # GitHub Integration
-    get_github_mcp_tools_sync,
-)
+from .agent_handoffs import *
+from .research_communication import *
+from .filesystem_code import *
+from .code_review_quality import *
+from .github_integration import *
 
 
-def get_all_tools() -> List:
+def get_all_tools():
     """Get all available tools for agent initialization.
     
     Returns:
@@ -48,21 +24,12 @@ def get_all_tools() -> List:
         # Research & Communication
         web_search, web_search_news, web_search_academic,
         
-        # Document & Knowledge Management
-        search_documents, create_document, update_document,
-        
-        # Database & Data
-        query_database, get_project_metrics,
-        
         # Filesystem & Code
         read_file, write_file, list_files,
         
         # Code Development & Quality
         run_code, run_tests, run_static_analysis, run_security_scan, 
         run_code_quality_check, request_copilot_review,
-        
-        # Project Management
-        create_task, update_task_status, get_team_workload
     ]
     
     # Add GitHub MCP tools (enhanced GitHub integration with 45 tools)
@@ -77,7 +44,7 @@ def get_all_tools() -> List:
     return base_tools
 
 
-def get_tool_descriptions() -> dict:
+def get_tool_descriptions():
     """Get descriptions of all available tools for agent awareness.
     
     Returns:
@@ -87,19 +54,24 @@ def get_tool_descriptions() -> dict:
     return {tool.name: tool.description for tool in tools}
 
 
-# Export commonly used tools for direct access
 __all__ = [
     'get_all_tools',
     'get_tool_descriptions',
     
-    # Tool categories for direct import if needed
+    # Agent Handoffs
     'transfer_to_qa_engineer', 'escalate_to_cto', 'request_peer_review',
     'delegate_to_engineering_manager', 'transfer_to_senior_engineer', 'escalate_to_human',
+    
+    # Research & Communication
     'web_search', 'web_search_news', 'web_search_academic',
-    'search_documents', 'create_document', 'update_document',
-    'query_database', 'get_project_metrics',
+    
+    # Filesystem & Code
     'read_file', 'write_file', 'list_files',
+    
+    # Code Development & Quality
     'run_code', 'run_tests', 'run_static_analysis', 'run_security_scan',
     'run_code_quality_check', 'request_copilot_review',
-    'create_task', 'update_task_status', 'get_team_workload',
+    
+    # GitHub Integration
+    'get_github_mcp_tools_sync',
 ]
