@@ -3,12 +3,9 @@
 import asyncio
 import concurrent.futures
 
-# GitHub MCP Integration
+# Direct import from github_mcp module (in parent directory)
 try:
-    try:
-        from .github_mcp import GitHubMCPClient, create_github_mcp_tools, get_github_token
-    except ImportError:
-        from github_mcp import GitHubMCPClient, create_github_mcp_tools, get_github_token
+    from ..github_mcp import GitHubMCPClient, create_github_mcp_tools, get_github_token
 except ImportError:
     print("Warning: GitHub MCP integration not available - github_mcp module not found")
     GitHubMCPClient = None
