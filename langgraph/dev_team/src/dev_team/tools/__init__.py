@@ -13,6 +13,7 @@ from .github_integration import *
 from .mcp_code_execution import *
 from .mcp_code_analysis import *
 from .mcp_file_operations import *
+from .mcp_qa_tools import *
 
 
 def get_all_tools():
@@ -46,6 +47,10 @@ def get_all_tools():
         # MCP File Operations Tools
         analyze_file_importance, read_file_efficiently, edit_file_at_line,
         edit_file_range, get_language_server_info, clear_file_cache,
+        
+        # MCP QA & Testing Tools
+        analyze_code_quality, run_load_test, create_load_test_script,
+        validate_test_environment,
     ]
     
     # Add GitHub MCP tools (enhanced GitHub integration with 45 tools)
@@ -101,4 +106,8 @@ __all__ = [
     # MCP File Operations Tools
     'analyze_file_importance', 'read_file_efficiently', 'edit_file_at_line',
     'edit_file_range', 'get_language_server_info', 'clear_file_cache',
+    
+    # MCP QA & Testing Tools
+    'analyze_code_quality', 'run_load_test', 'create_load_test_script',
+    'validate_test_environment',
 ]
