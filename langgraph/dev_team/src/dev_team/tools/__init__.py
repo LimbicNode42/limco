@@ -9,6 +9,11 @@ from .filesystem_code import *
 from .code_review_quality import *
 from .github_integration import *
 
+# Import MCP tools
+from .mcp_code_execution import *
+from .mcp_code_analysis import *
+from .mcp_file_operations import *
+
 
 def get_all_tools():
     """Get all available tools for agent initialization.
@@ -30,6 +35,17 @@ def get_all_tools():
         # Code Development & Quality
         run_code, run_tests, run_static_analysis, run_security_scan, 
         run_code_quality_check, request_copilot_review,
+        
+        # MCP Code Execution Tools
+        execute_python_secure, execute_python_with_packages, create_virtual_environment,
+        list_virtual_environments,
+        
+        # MCP Code Analysis Tools
+        analyze_repository_structure, analyze_python_file,
+        
+        # MCP File Operations Tools
+        analyze_file_importance, read_file_efficiently, edit_file_at_line,
+        edit_file_range, get_language_server_info, clear_file_cache,
     ]
     
     # Add GitHub MCP tools (enhanced GitHub integration with 45 tools)
@@ -74,4 +90,15 @@ __all__ = [
     
     # GitHub Integration
     'get_github_mcp_tools_sync',
+    
+    # MCP Code Execution Tools
+    'execute_python_secure', 'execute_python_with_packages', 'create_virtual_environment',
+    'list_virtual_environments',
+    
+    # MCP Code Analysis Tools
+    'analyze_repository_structure', 'analyze_python_file',
+    
+    # MCP File Operations Tools
+    'analyze_file_importance', 'read_file_efficiently', 'edit_file_at_line',
+    'edit_file_range', 'get_language_server_info', 'clear_file_cache',
 ]
