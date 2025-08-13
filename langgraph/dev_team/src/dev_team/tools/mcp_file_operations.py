@@ -4,6 +4,11 @@ This module provides file operations and project management capabilities using:
 - admica/FileScopeMCP concepts for dependency analysis
 - tumf/mcp-text-editor for efficient text editing
 - isaacphi/mcp-language-server for language server integration
+
+Implements hybrid connection strategy:
+- Primary: MCP Aggregator connection (MCPX, mcgravity, etc.)
+- Secondary: Individual MCP server startup
+- Tertiary: Native Python implementations (always available)
 """
 
 import os
@@ -11,6 +16,9 @@ import re
 import json
 import subprocess
 import tempfile
+import time
+import threading
+import requests
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple, Union
 import logging
@@ -20,6 +28,205 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from langchain_core.tools import tool
 
 logger = logging.getLogger(__name__)
+
+# MCP Server Configuration - Hybrid Approach
+# Primary: Connect to MCP Aggregator/Proxy
+# Secondary: Start individual MCP servers
+MCP_FILE_CONFIG = {
+    "aggregator": {
+        "enabled": True,
+        "url": os.getenv("MCP_AGGREGATOR_URL", "http://localhost:8080"),
+        "timeout": 5,
+        "filescopemcp_endpoint": "/filescopemcp",
+        "texteditor_endpoint": "/texteditor",
+        "languageserver_endpoint": "/languageserver"
+    },
+    "individual_servers": {
+        "filescopemcp": {
+            "port": int(os.getenv("FILESCOPEMCP_PORT", "6971")),
+            "host": "127.0.0.1",
+            "start_command": ["filescopemcp", "--transport", "sse"],
+            "health_endpoint": "/health"
+        },
+        "texteditor": {
+            "port": int(os.getenv("TEXTEDITOR_MCP_PORT", "6972")),
+            "host": "127.0.0.1", 
+            "start_command": ["mcp-text-editor", "--transport", "sse"],
+            "health_endpoint": "/health"
+        },
+        "languageserver": {
+            "port": int(os.getenv("LANGUAGESERVER_MCP_PORT", "6973")),
+            "host": "127.0.0.1",
+            "start_command": ["mcp-language-server", "--transport", "sse"],
+            "health_endpoint": "/health"
+        }
+    },
+    "fallback_native": True,
+    "startup_timeout": 30,
+    "health_check_interval": 10
+}
+
+
+class MCPFileConnectionManager:
+    """Manages hybrid MCP connections for file operations - aggregator first, individual servers as fallback."""
+    
+    def __init__(self):
+        self.config = MCP_FILE_CONFIG
+        self.aggregator_available = False
+        self.individual_servers = {}
+        self.server_processes = {}
+        self._lock = threading.Lock()
+        
+    def check_aggregator_health(self) -> bool:
+        """Check if MCP aggregator is available."""
+        if not self.config["aggregator"]["enabled"]:
+            return False
+            
+        try:
+            url = self.config["aggregator"]["url"]
+            timeout = self.config["aggregator"]["timeout"]
+            response = requests.get(f"{url}/health", timeout=timeout)
+            return response.status_code == 200
+        except Exception as e:
+            logger.debug(f"Aggregator health check failed: {e}")
+            return False
+    
+    def start_individual_server(self, server_name: str) -> bool:
+        """Start an individual MCP server."""
+        if server_name in self.server_processes:
+            return True  # Already running
+            
+        config = self.config["individual_servers"].get(server_name)
+        if not config:
+            logger.error(f"No configuration found for server: {server_name}")
+            return False
+        
+        # Check if command exists
+        cmd_name = config["start_command"][0]
+        if not self._check_command_exists(cmd_name):
+            logger.warning(f"Command '{cmd_name}' not found, cannot start {server_name} server")
+            return False
+            
+        try:
+            # Build command with host and port
+            cmd = config["start_command"] + [
+                "--host", config["host"],
+                "--port", str(config["port"])
+            ]
+            
+            logger.info(f"Starting {server_name} MCP server: {' '.join(cmd)}")
+            
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            
+            # Store process reference
+            with self._lock:
+                self.server_processes[server_name] = process
+            
+            # Wait a bit for server to start
+            time.sleep(2)
+            
+            # Check if server is healthy
+            if self.check_individual_server_health(server_name):
+                logger.info(f"{server_name} MCP server started successfully")
+                return True
+            else:
+                logger.error(f"{server_name} MCP server failed health check")
+                self.stop_individual_server(server_name)
+                return False
+                
+        except Exception as e:
+            logger.error(f"Failed to start {server_name} MCP server: {e}")
+            return False
+    
+    def _check_command_exists(self, command: str) -> bool:
+        """Check if a command exists in the system PATH."""
+        try:
+            subprocess.run([command, "--version"], capture_output=True, timeout=5)
+            return True
+        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError):
+            return False
+    
+    def check_individual_server_health(self, server_name: str) -> bool:
+        """Check health of individual MCP server."""
+        config = self.config["individual_servers"].get(server_name)
+        if not config:
+            return False
+            
+        try:
+            url = f"http://{config['host']}:{config['port']}{config['health_endpoint']}"
+            response = requests.get(url, timeout=2)
+            return response.status_code == 200
+        except Exception:
+            return False
+    
+    def stop_individual_server(self, server_name: str):
+        """Stop an individual MCP server."""
+        with self._lock:
+            if server_name in self.server_processes:
+                process = self.server_processes[server_name]
+                try:
+                    process.terminate()
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                except Exception as e:
+                    logger.warning(f"Error stopping {server_name} server: {e}")
+                finally:
+                    del self.server_processes[server_name]
+    
+    def get_connection_info(self, server_type: str) -> Dict[str, Any]:
+        """Get connection info for a server type (filescopemcp/texteditor/languageserver)."""
+        # Try aggregator first
+        if self.check_aggregator_health():
+            aggregator_config = self.config["aggregator"]
+            endpoint = aggregator_config.get(f"{server_type}_endpoint", f"/{server_type}")
+            return {
+                "method": "aggregator",
+                "url": f"{aggregator_config['url']}{endpoint}",
+                "available": True
+            }
+        
+        # Try individual server
+        with self._lock:
+            if not self.check_individual_server_health(server_type):
+                if self.start_individual_server(server_type):
+                    config = self.config["individual_servers"][server_type]
+                    return {
+                        "method": "individual",
+                        "url": f"http://{config['host']}:{config['port']}",
+                        "available": True
+                    }
+            else:
+                config = self.config["individual_servers"][server_type]
+                return {
+                    "method": "individual",
+                    "url": f"http://{config['host']}:{config['port']}",
+                    "available": True
+                }
+        
+        # Fallback to native - always available
+        return {
+            "method": "native",
+            "url": None,
+            "available": True  # Native implementations should always be available
+        }
+    
+    def cleanup(self):
+        """Clean up all running servers."""
+        for server_name in list(self.server_processes.keys()):
+            self.stop_individual_server(server_name)
+
+
+# Global connection manager instance
+_mcp_file_manager = MCPFileConnectionManager()
+
+# Alias for compatibility with test suite
+MCPConnectionManager = MCPFileConnectionManager
 
 
 @dataclass
@@ -604,7 +811,7 @@ def analyze_file_importance(
     project_path: str,
     max_files: int = 50
 ) -> Dict[str, Any]:
-    """Analyze file importance and dependencies in a project.
+    """Analyze file importance and dependencies in a project using hybrid MCP connection.
     
     Args:
         project_path: Path to project root
@@ -614,6 +821,39 @@ def analyze_file_importance(
         Dict with file importance analysis
     """
     try:
+        connection_info = _mcp_file_manager.get_connection_info("filescopemcp")
+        
+        if connection_info["method"] in ["aggregator", "individual"]:
+            # Use MCP server
+            payload = {
+                "method": "tools/call",
+                "params": {
+                    "name": "analyze_file_importance",
+                    "arguments": {
+                        "project_path": project_path,
+                        "max_files": max_files
+                    }
+                }
+            }
+            
+            try:
+                response = requests.post(
+                    f"{connection_info['url']}/mcp",
+                    json=payload,
+                    timeout=30
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    result["connection_method"] = connection_info["method"]
+                    return result
+                else:
+                    logger.warning(f"MCP server returned {response.status_code}, falling back to native")
+            except Exception as e:
+                logger.warning(f"MCP connection failed: {e}, falling back to native")
+        
+        # Native fallback implementation
+        logger.info("Using native file importance analysis")
         analyzer = get_file_scope_analyzer()
         file_scopes = analyzer.analyze_project_scope(project_path)
         
@@ -629,6 +869,7 @@ def analyze_file_importance(
         
         return {
             "success": True,
+            "connection_method": "native",
             "total_files_analyzed": len(file_scopes),
             "important_files": [asdict(file_scope) for file_scope in top_files],
             "summary": {
@@ -642,7 +883,8 @@ def analyze_file_importance(
         logger.error(f"File importance analysis failed: {e}")
         return {
             "success": False,
-            "error": f"Analysis failed: {str(e)}"
+            "error": f"Analysis failed: {str(e)}",
+            "connection_method": "native"
         }
 
 

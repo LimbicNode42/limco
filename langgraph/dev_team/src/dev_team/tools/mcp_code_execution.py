@@ -1,7 +1,13 @@
 """MCP Code Execution Tools
 
-This module provides secure Python code execution capabilities using both
-pydantic-ai/mcp-run-python for sandboxed execution and native subprocess for development.
+This module provides secure Python code execution capabilities using:
+- pydantic-ai/mcp-run-python for sandboxed execution
+- native subprocess for development
+
+Implements hybrid connection strategy:
+- Primary: MCP Aggregator connection (MCPX, mcgravity, etc.)
+- Secondary: Individual MCP server startup
+- Tertiary: Native Python implementations (always available)
 """
 
 import asyncio
@@ -9,6 +15,9 @@ import subprocess
 import tempfile
 import os
 import sys
+import time
+import threading
+import requests
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Union
 import logging
@@ -19,6 +28,198 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 logger = logging.getLogger(__name__)
+
+# MCP Server Configuration - Hybrid Approach
+# Primary: Connect to MCP Aggregator/Proxy
+# Secondary: Start individual MCP servers
+MCP_EXEC_CONFIG = {
+    "aggregator": {
+        "enabled": True,
+        "url": os.getenv("MCP_AGGREGATOR_URL", "http://localhost:8080"),
+        "timeout": 5,
+        "python_executor_endpoint": "/python-executor",
+        "deno_executor_endpoint": "/deno-executor"
+    },
+    "individual_servers": {
+        "python-executor": {
+            "port": int(os.getenv("PYTHON_EXECUTOR_MCP_PORT", "6974")),
+            "host": "127.0.0.1",
+            "start_command": ["mcp-run-python", "--transport", "sse"],
+            "health_endpoint": "/health"
+        },
+        "deno-executor": {
+            "port": int(os.getenv("DENO_EXECUTOR_MCP_PORT", "6975")),
+            "host": "127.0.0.1", 
+            "start_command": ["deno-mcp-executor", "--transport", "sse"],
+            "health_endpoint": "/health"
+        }
+    },
+    "fallback_native": True,
+    "startup_timeout": 30,
+    "health_check_interval": 10
+}
+
+
+class MCPExecConnectionManager:
+    """Manages hybrid MCP connections for code execution - aggregator first, individual servers as fallback."""
+    
+    def __init__(self):
+        self.config = MCP_EXEC_CONFIG
+        self.aggregator_available = False
+        self.individual_servers = {}
+        self.server_processes = {}
+        self._lock = threading.Lock()
+        
+    def check_aggregator_health(self) -> bool:
+        """Check if MCP aggregator is available."""
+        if not self.config["aggregator"]["enabled"]:
+            return False
+            
+        try:
+            url = self.config["aggregator"]["url"]
+            timeout = self.config["aggregator"]["timeout"]
+            response = requests.get(f"{url}/health", timeout=timeout)
+            return response.status_code == 200
+        except Exception as e:
+            logger.debug(f"Aggregator health check failed: {e}")
+            return False
+    
+    def start_individual_server(self, server_name: str) -> bool:
+        """Start an individual MCP server."""
+        if server_name in self.server_processes:
+            return True  # Already running
+            
+        config = self.config["individual_servers"].get(server_name)
+        if not config:
+            logger.error(f"No configuration found for server: {server_name}")
+            return False
+        
+        # Check if command exists
+        cmd_name = config["start_command"][0]
+        if not self._check_command_exists(cmd_name):
+            logger.warning(f"Command '{cmd_name}' not found, cannot start {server_name} server")
+            return False
+            
+        try:
+            # Build command with host and port
+            cmd = config["start_command"] + [
+                "--host", config["host"],
+                "--port", str(config["port"])
+            ]
+            
+            logger.info(f"Starting {server_name} MCP server: {' '.join(cmd)}")
+            
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            
+            # Store process reference
+            with self._lock:
+                self.server_processes[server_name] = process
+            
+            # Wait a bit for server to start
+            time.sleep(2)
+            
+            # Check if server is healthy
+            if self.check_individual_server_health(server_name):
+                logger.info(f"{server_name} MCP server started successfully")
+                return True
+            else:
+                logger.error(f"{server_name} MCP server failed health check")
+                self.stop_individual_server(server_name)
+                return False
+                
+        except Exception as e:
+            logger.error(f"Failed to start {server_name} MCP server: {e}")
+            return False
+    
+    def _check_command_exists(self, command: str) -> bool:
+        """Check if a command exists in the system PATH."""
+        try:
+            subprocess.run([command, "--version"], capture_output=True, timeout=5)
+            return True
+        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError):
+            return False
+    
+    def check_individual_server_health(self, server_name: str) -> bool:
+        """Check health of individual MCP server."""
+        config = self.config["individual_servers"].get(server_name)
+        if not config:
+            return False
+            
+        try:
+            url = f"http://{config['host']}:{config['port']}{config['health_endpoint']}"
+            response = requests.get(url, timeout=2)
+            return response.status_code == 200
+        except Exception:
+            return False
+    
+    def stop_individual_server(self, server_name: str):
+        """Stop an individual MCP server."""
+        with self._lock:
+            if server_name in self.server_processes:
+                process = self.server_processes[server_name]
+                try:
+                    process.terminate()
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                except Exception as e:
+                    logger.warning(f"Error stopping {server_name} server: {e}")
+                finally:
+                    del self.server_processes[server_name]
+    
+    def get_connection_info(self, server_type: str) -> Dict[str, Any]:
+        """Get connection info for a server type (python-executor/deno-executor)."""
+        # Try aggregator first
+        if self.check_aggregator_health():
+            aggregator_config = self.config["aggregator"]
+            endpoint = aggregator_config.get(f"{server_type.replace('-', '_')}_endpoint", f"/{server_type}")
+            return {
+                "method": "aggregator",
+                "url": f"{aggregator_config['url']}{endpoint}",
+                "available": True
+            }
+        
+        # Try individual server
+        with self._lock:
+            if not self.check_individual_server_health(server_type):
+                if self.start_individual_server(server_type):
+                    config = self.config["individual_servers"][server_type]
+                    return {
+                        "method": "individual",
+                        "url": f"http://{config['host']}:{config['port']}",
+                        "available": True
+                    }
+            else:
+                config = self.config["individual_servers"][server_type]
+                return {
+                    "method": "individual",
+                    "url": f"http://{config['host']}:{config['port']}",
+                    "available": True
+                }
+        
+        # Fallback to native - always available
+        return {
+            "method": "native",
+            "url": None,
+            "available": True  # Native implementations should always be available
+        }
+    
+    def cleanup(self):
+        """Clean up all running servers."""
+        for server_name in list(self.server_processes.keys()):
+            self.stop_individual_server(server_name)
+
+
+# Global connection manager instance
+_mcp_exec_manager = MCPExecConnectionManager()
+
+# Alias for compatibility with test suite
+MCPConnectionManager = MCPExecConnectionManager
 
 
 @dataclass
@@ -244,54 +445,145 @@ def execute_python_secure(
     use_mcp: bool = True,
     timeout: int = 30
 ) -> Dict[str, Any]:
-    """Execute Python code in a secure environment.
+    """Execute Python code in a secure environment using hybrid connection strategy.
+    
+    Execution order:
+    1. MCP Aggregator (if available and use_mcp=True)
+    2. Individual MCP servers (python-executor)
+    3. Native subprocess execution (always available)
     
     Args:
         python_code: Python code to execute
-        use_mcp: If True, use MCP sandboxed execution; if False, use native subprocess
+        use_mcp: If True, attempt MCP execution before native fallback
         timeout: Execution timeout in seconds (only for native execution)
         
     Returns:
         Dict with execution results including success, output, error, etc.
     """
-    if use_mcp:
-        # Use MCP sandboxed execution
-        try:
-            import asyncio
-            
-            async def run_mcp():
-                async with get_mcp_executor() as executor:
-                    return await executor.execute_code(python_code)
-            
-            # Check if we're in an event loop
-            try:
-                loop = asyncio.get_running_loop()
-                # We're in an async context, need to handle this differently
-                result = asyncio.create_task(run_mcp())
-                # For now, fall back to native execution in async contexts
-                use_mcp = False
-            except RuntimeError:
-                # No event loop, we can run directly
-                result = asyncio.run(run_mcp())
-                
-        except Exception as e:
-            logger.warning(f"MCP execution failed, falling back to native: {e}")
-            use_mcp = False
+    execution_method = "unknown"
+    result = None
     
-    if not use_mcp:
-        # Use native subprocess execution
+    if use_mcp:
+        # Try hybrid MCP connection strategy
+        connection_info = _mcp_exec_manager.get_connection_info("python-executor")
+        
+        if connection_info["available"] and connection_info["method"] != "native":
+            try:
+                if connection_info["method"] == "aggregator":
+                    # Use aggregator endpoint
+                    execution_method = "mcp_aggregator"
+                    result = _execute_via_aggregator(python_code, connection_info["url"])
+                    
+                elif connection_info["method"] == "individual":
+                    # Use individual MCP server
+                    execution_method = "mcp_individual"
+                    result = _execute_via_individual_mcp(python_code, connection_info["url"])
+                    
+                if result and result.success:
+                    return {
+                        "success": result.success,
+                        "output": result.output,
+                        "error": result.error,
+                        "return_value": result.return_value,
+                        "dependencies": result.dependencies,
+                        "execution_time": result.execution_time,
+                        "executor_type": execution_method
+                    }
+                else:
+                    logger.warning(f"MCP execution via {execution_method} failed, falling back to native")
+                    
+            except Exception as e:
+                logger.warning(f"MCP execution via {connection_info['method']} failed: {e}, falling back to native")
+    
+    # Native fallback - always available
+    execution_method = "native"
+    try:
         executor = get_native_executor()
         result = executor.execute_code(python_code, timeout)
-    
-    return {
-        "success": result.success,
-        "output": result.output,
-        "error": result.error,
-        "return_value": result.return_value,
-        "dependencies": result.dependencies,
-        "execution_time": result.execution_time,
-        "executor_type": "mcp" if use_mcp else "native"
-    }
+        
+        return {
+            "success": result.success,
+            "output": result.output,
+            "error": result.error,
+            "return_value": result.return_value,
+            "dependencies": result.dependencies,
+            "execution_time": result.execution_time,
+            "executor_type": execution_method
+        }
+        
+    except Exception as e:
+        logger.error(f"All execution methods failed: {e}")
+        return {
+            "success": False,
+            "output": "",
+            "error": f"All execution methods failed: {str(e)}",
+            "return_value": None,
+            "dependencies": None,
+            "execution_time": None,
+            "executor_type": "failed"
+        }
+
+
+def _execute_via_aggregator(python_code: str, aggregator_url: str) -> CodeExecutionResult:
+    """Execute Python code via MCP aggregator."""
+    try:
+        response = requests.post(
+            aggregator_url,
+            json={"python_code": python_code},
+            timeout=30,
+            headers={"Content-Type": "application/json"}
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            return CodeExecutionResult(
+                success=data.get("success", False),
+                output=data.get("output", ""),
+                error=data.get("error", ""),
+                return_value=data.get("return_value"),
+                dependencies=data.get("dependencies"),
+                execution_time=data.get("execution_time")
+            )
+        else:
+            return CodeExecutionResult(
+                success=False,
+                output="",
+                error=f"Aggregator returned status {response.status_code}: {response.text}"
+            )
+            
+    except Exception as e:
+        return CodeExecutionResult(
+            success=False,
+            output="",
+            error=f"Aggregator request failed: {str(e)}"
+        )
+
+
+def _execute_via_individual_mcp(python_code: str, server_url: str) -> CodeExecutionResult:
+    """Execute Python code via individual MCP server."""
+    try:
+        import asyncio
+        
+        async def run_mcp():
+            async with get_mcp_executor() as executor:
+                return await executor.execute_code(python_code)
+        
+        # Check if we're in an event loop
+        try:
+            loop = asyncio.get_running_loop()
+            # We're in an async context, need to handle this differently
+            # For now, return None to trigger fallback
+            return None
+        except RuntimeError:
+            # No event loop, we can run directly
+            return asyncio.run(run_mcp())
+            
+    except Exception as e:
+        return CodeExecutionResult(
+            success=False,
+            output="",
+            error=f"Individual MCP execution failed: {str(e)}"
+        )
 
 
 @tool
@@ -301,13 +593,18 @@ def execute_python_with_packages(
     use_inline_metadata: bool = True,
     use_mcp: bool = True
 ) -> Dict[str, Any]:
-    """Execute Python code with specific package dependencies.
+    """Execute Python code with specific package dependencies using hybrid strategy.
+    
+    Execution order:
+    1. MCP Aggregator (with PEP 723 metadata if supported)
+    2. Individual MCP servers (python-executor with metadata)
+    3. Native execution with pip install
     
     Args:
         python_code: Python code to execute
         packages: List of package names to install/use
         use_inline_metadata: If True, add PEP 723 metadata for packages
-        use_mcp: If True, use MCP execution; if False, use native with pip install
+        use_mcp: If True, attempt MCP execution before native fallback
         
     Returns:
         Dict with execution results
@@ -319,8 +616,11 @@ def execute_python_with_packages(
         metadata += "# ///\n\n"
         python_code = metadata + python_code
     
-    if not use_mcp and packages:
-        # Install packages using pip for native execution
+    # Try MCP execution first (which should handle the metadata)
+    result = execute_python_secure(python_code, use_mcp=use_mcp)
+    
+    # If MCP failed and we're using native execution, install packages first
+    if not result["success"] and result["executor_type"] == "native" and packages:
         try:
             executor = get_native_executor()
             for package in packages:
@@ -337,8 +637,13 @@ def execute_python_with_packages(
                         "return_value": None,
                         "dependencies": packages,
                         "execution_time": None,
-                        "executor_type": "native"
+                        "executor_type": "native_with_packages"
                     }
+            
+            # Try execution again after installing packages
+            result = execute_python_secure(python_code, use_mcp=False)  # Force native
+            result["executor_type"] = "native_with_packages"
+            
         except Exception as e:
             return {
                 "success": False,
@@ -347,10 +652,12 @@ def execute_python_with_packages(
                 "return_value": None,
                 "dependencies": packages,
                 "execution_time": None,
-                "executor_type": "native"
+                "executor_type": "native_with_packages"
             }
     
-    return execute_python_secure(python_code, use_mcp=use_mcp)
+    # Add package information to result
+    result["dependencies"] = packages
+    return result
 
 
 @tool

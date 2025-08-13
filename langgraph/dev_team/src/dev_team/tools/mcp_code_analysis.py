@@ -4,6 +4,11 @@ This module provides code analysis and understanding capabilities using:
 - oraios/serena for language server-based symbolic analysis
 - pdavis68/RepoMapper for repository structure analysis
 - Native AST analysis for Python
+
+Implements hybrid connection strategy:
+- Primary: MCP Aggregator connection (MCPX, mcgravity, etc.)
+- Secondary: Individual MCP server startup
+- Tertiary: Native Python implementations (always available)
 """
 
 import ast
@@ -11,6 +16,9 @@ import os
 import subprocess
 import tempfile
 import json
+import time
+import threading
+import requests
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Union, Tuple
 import logging
@@ -19,6 +27,198 @@ from dataclasses import dataclass, asdict
 from langchain_core.tools import tool
 
 logger = logging.getLogger(__name__)
+
+# MCP Server Configuration - Hybrid Approach
+# Primary: Connect to MCP Aggregator/Proxy
+# Secondary: Start individual MCP servers
+MCP_ANALYSIS_CONFIG = {
+    "aggregator": {
+        "enabled": True,
+        "url": os.getenv("MCP_AGGREGATOR_URL", "http://localhost:8080"),
+        "timeout": 5,
+        "serena_endpoint": "/serena",
+        "repo_mapper_endpoint": "/repo-mapper"
+    },
+    "individual_servers": {
+        "serena": {
+            "port": int(os.getenv("SERENA_MCP_PORT", "6976")),
+            "host": "127.0.0.1",
+            "start_command": ["uvx", "--from", "git+https://github.com/oraios/serena", "serena", "start-mcp-server", "--context", "ide-assistant"],
+            "health_endpoint": "/health"
+        },
+        "repo-mapper": {
+            "port": int(os.getenv("REPO_MAPPER_MCP_PORT", "6977")),
+            "host": "127.0.0.1",
+            "start_command": ["repo-mapper-mcp", "--transport", "sse"],
+            "health_endpoint": "/health"
+        }
+    },
+    "fallback_native": True,
+    "startup_timeout": 30,
+    "health_check_interval": 10
+}
+
+
+class MCPAnalysisConnectionManager:
+    """Manages hybrid MCP connections for code analysis - aggregator first, individual servers as fallback."""
+    
+    def __init__(self):
+        self.config = MCP_ANALYSIS_CONFIG
+        self.aggregator_available = False
+        self.individual_servers = {}
+        self.server_processes = {}
+        self._lock = threading.Lock()
+        
+    def check_aggregator_health(self) -> bool:
+        """Check if MCP aggregator is available."""
+        if not self.config["aggregator"]["enabled"]:
+            return False
+            
+        try:
+            url = self.config["aggregator"]["url"]
+            timeout = self.config["aggregator"]["timeout"]
+            response = requests.get(f"{url}/health", timeout=timeout)
+            return response.status_code == 200
+        except Exception as e:
+            logger.debug(f"Aggregator health check failed: {e}")
+            return False
+    
+    def start_individual_server(self, server_name: str) -> bool:
+        """Start an individual MCP server."""
+        if server_name in self.server_processes:
+            return True  # Already running
+            
+        config = self.config["individual_servers"].get(server_name)
+        if not config:
+            logger.error(f"No configuration found for server: {server_name}")
+            return False
+        
+        # Check if command exists
+        cmd_name = config["start_command"][0]
+        if not self._check_command_exists(cmd_name):
+            logger.warning(f"Command '{cmd_name}' not found, cannot start {server_name} server")
+            return False
+            
+        try:
+            # Build command with host and port
+            cmd = config["start_command"] + [
+                "--host", config["host"],
+                "--port", str(config["port"])
+            ]
+            
+            logger.info(f"Starting {server_name} MCP server: {' '.join(cmd)}")
+            
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            
+            # Store process reference
+            with self._lock:
+                self.server_processes[server_name] = process
+            
+            # Wait a bit for server to start
+            time.sleep(2)
+            
+            # Check if server is healthy
+            if self.check_individual_server_health(server_name):
+                logger.info(f"{server_name} MCP server started successfully")
+                return True
+            else:
+                logger.error(f"{server_name} MCP server failed health check")
+                self.stop_individual_server(server_name)
+                return False
+                
+        except Exception as e:
+            logger.error(f"Failed to start {server_name} MCP server: {e}")
+            return False
+    
+    def _check_command_exists(self, command: str) -> bool:
+        """Check if a command exists in the system PATH."""
+        try:
+            subprocess.run([command, "--version"], capture_output=True, timeout=5)
+            return True
+        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError):
+            return False
+    
+    def check_individual_server_health(self, server_name: str) -> bool:
+        """Check health of individual MCP server."""
+        config = self.config["individual_servers"].get(server_name)
+        if not config:
+            return False
+            
+        try:
+            url = f"http://{config['host']}:{config['port']}{config['health_endpoint']}"
+            response = requests.get(url, timeout=2)
+            return response.status_code == 200
+        except Exception:
+            return False
+    
+    def stop_individual_server(self, server_name: str):
+        """Stop an individual MCP server."""
+        with self._lock:
+            if server_name in self.server_processes:
+                process = self.server_processes[server_name]
+                try:
+                    process.terminate()
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                except Exception as e:
+                    logger.warning(f"Error stopping {server_name} server: {e}")
+                finally:
+                    del self.server_processes[server_name]
+    
+    def get_connection_info(self, server_type: str) -> Dict[str, Any]:
+        """Get connection info for a server type (serena/repo-mapper)."""
+        # Try aggregator first
+        if self.check_aggregator_health():
+            aggregator_config = self.config["aggregator"]
+            endpoint = aggregator_config.get(f"{server_type.replace('-', '_')}_endpoint", f"/{server_type}")
+            return {
+                "method": "aggregator",
+                "url": f"{aggregator_config['url']}{endpoint}",
+                "available": True
+            }
+        
+        # Try individual server
+        with self._lock:
+            if not self.check_individual_server_health(server_type):
+                if self.start_individual_server(server_type):
+                    config = self.config["individual_servers"][server_type]
+                    return {
+                        "method": "individual",
+                        "url": f"http://{config['host']}:{config['port']}",
+                        "available": True
+                    }
+            else:
+                config = self.config["individual_servers"][server_type]
+                return {
+                    "method": "individual",
+                    "url": f"http://{config['host']}:{config['port']}",
+                    "available": True
+                }
+        
+        # Fallback to native - always available
+        return {
+            "method": "native",
+            "url": None,
+            "available": True  # Native implementations should always be available
+        }
+    
+    def cleanup(self):
+        """Clean up all running servers."""
+        for server_name in list(self.server_processes.keys()):
+            self.stop_individual_server(server_name)
+
+
+# Global connection manager instance
+_mcp_analysis_manager = MCPAnalysisConnectionManager()
+
+# Alias for compatibility with test suite
+MCPConnectionManager = MCPAnalysisConnectionManager
 
 
 @dataclass
@@ -461,61 +661,161 @@ def analyze_repository_structure(
     repo_path: str,
     use_serena: bool = True
 ) -> Dict[str, Any]:
-    """Analyze repository structure and dependencies.
+    """Analyze repository structure and dependencies using hybrid connection strategy.
+    
+    Analysis order:
+    1. MCP Aggregator (if available and use_serena=True)
+    2. Individual MCP servers (serena, repo-mapper)
+    3. Native Python implementations (always available)
     
     Args:
         repo_path: Path to repository root
-        use_serena: Whether to use Serena for enhanced analysis
+        use_serena: Whether to attempt Serena analysis for enhanced results
         
     Returns:
         Dict with repository analysis results
     """
     try:
         repo_path = os.path.abspath(repo_path)
+        analysis_methods = []
+        result = {}
         
-        # Use RepoMapper for base analysis
+        # Try MCP-based analysis first if requested
+        if use_serena:
+            # Try Serena via hybrid connection
+            connection_info = _mcp_analysis_manager.get_connection_info("serena")
+            
+            if connection_info["available"] and connection_info["method"] != "native":
+                serena_result = _analyze_via_serena(repo_path, connection_info)
+                if serena_result:
+                    result["serena_analysis"] = serena_result
+                    analysis_methods.append(f"serena_{connection_info['method']}")
+                    logger.info(f"Serena analysis completed via {connection_info['method']}")
+                else:
+                    logger.warning("Serena analysis failed, continuing with native analysis")
+            
+            # Try RepoMapper via hybrid connection
+            connection_info = _mcp_analysis_manager.get_connection_info("repo-mapper")
+            
+            if connection_info["available"] and connection_info["method"] != "native":
+                mapper_result = _analyze_via_repo_mapper(repo_path, connection_info)
+                if mapper_result:
+                    result["repo_mapper_analysis"] = mapper_result
+                    analysis_methods.append(f"repo_mapper_{connection_info['method']}")
+                    logger.info(f"RepoMapper analysis completed via {connection_info['method']}")
+        
+        # Always include native analysis as baseline/fallback
         repo_analyzer = get_repo_mapper_analyzer()
         structure = repo_analyzer.analyze_repository(repo_path)
-        
-        result = asdict(structure)
-        result['analysis_methods'] = ['repo_mapper']
-        
-        # Enhance with Serena if available and requested
-        if use_serena:
-            serena_analyzer = get_serena_analyzer()
-            if serena_analyzer.is_available():
-                serena_structure = serena_analyzer.analyze_project(repo_path)
-                if serena_structure:
-                    result['serena_analysis'] = asdict(serena_structure)
-                    result['analysis_methods'].append('serena')
-            else:
-                result['serena_warning'] = "Serena not available - install uvx and ensure network access"
+        result["repository_structure"] = asdict(structure)
+        analysis_methods.append("native_repo_mapper")
         
         return {
             "success": True,
-            "repository_analysis": result
+            "repository_analysis": result,
+            "analysis_methods": analysis_methods,
+            "total_files": structure.total_files,
+            "languages": structure.languages
         }
         
     except Exception as e:
         logger.error(f"Repository analysis failed: {e}")
         return {
             "success": False,
-            "error": f"Analysis failed: {str(e)}"
+            "error": f"Analysis failed: {str(e)}",
+            "analysis_methods": ["failed"]
         }
+
+
+def _analyze_via_serena(repo_path: str, connection_info: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Analyze repository via Serena MCP connection."""
+    try:
+        if connection_info["method"] == "aggregator":
+            response = requests.post(
+                f"{connection_info['url']}/analyze_project",
+                json={"project_path": repo_path},
+                timeout=30,
+                headers={"Content-Type": "application/json"}
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                logger.warning(f"Serena aggregator returned {response.status_code}: {response.text}")
+                return None
+                
+        elif connection_info["method"] == "individual":
+            # Individual Serena server analysis
+            response = requests.post(
+                f"{connection_info['url']}/analyze",
+                json={"path": repo_path, "type": "project"},
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                return None
+                
+    except Exception as e:
+        logger.warning(f"Serena MCP analysis failed: {e}")
+        return None
+
+
+def _analyze_via_repo_mapper(repo_path: str, connection_info: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Analyze repository via RepoMapper MCP connection."""
+    try:
+        if connection_info["method"] == "aggregator":
+            response = requests.post(
+                f"{connection_info['url']}/map_repository",
+                json={"repo_path": repo_path},
+                timeout=30,
+                headers={"Content-Type": "application/json"}
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                logger.warning(f"RepoMapper aggregator returned {response.status_code}: {response.text}")
+                return None
+                
+        elif connection_info["method"] == "individual":
+            # Individual RepoMapper server analysis
+            response = requests.post(
+                f"{connection_info['url']}/map",
+                json={"repository_path": repo_path},
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                return None
+                
+    except Exception as e:
+        logger.warning(f"RepoMapper MCP analysis failed: {e}")
+        return None
 
 
 @tool
 def analyze_python_file(
     file_path: str,
     include_ast: bool = True,
-    include_symbols: bool = True
+    include_symbols: bool = True,
+    use_serena: bool = True
 ) -> Dict[str, Any]:
-    """Analyze a Python file for symbols, structure, and complexity.
+    """Analyze a Python file for symbols, structure, and complexity using hybrid strategy.
+    
+    Analysis order:
+    1. MCP Aggregator with Serena (if available and use_serena=True)
+    2. Individual Serena MCP server
+    3. Native Python AST analysis (always available)
     
     Args:
         file_path: Path to Python file
         include_ast: Whether to include AST analysis
         include_symbols: Whether to include symbol extraction
+        use_serena: Whether to attempt Serena analysis for enhanced results
         
     Returns:
         Dict with file analysis results
@@ -535,32 +835,82 @@ def analyze_python_file(
                 "error": f"Not a Python file: {file_path}"
             }
         
-        results = {}
+        analysis_methods = []
+        result = {}
         
-        if include_ast:
-            ast_analyzer = get_python_ast_analyzer()
-            analysis = ast_analyzer.analyze_file(file_path)
-            results['ast_analysis'] = asdict(analysis)
+        # Try Serena analysis first if requested
+        if use_serena:
+            connection_info = _mcp_analysis_manager.get_connection_info("serena")
+            
+            if connection_info["available"] and connection_info["method"] != "native":
+                serena_result = _analyze_file_via_serena(file_path, connection_info)
+                if serena_result:
+                    result["serena_analysis"] = serena_result
+                    analysis_methods.append(f"serena_{connection_info['method']}")
+                    logger.info(f"Serena file analysis completed via {connection_info['method']}")
         
-        # Add file metadata
-        file_stats = os.stat(file_path)
-        results['file_info'] = {
-            'size_bytes': file_stats.st_size,
-            'modified_time': file_stats.st_mtime,
-            'absolute_path': file_path
-        }
+        # Always include native AST analysis as baseline/fallback
+        ast_analyzer = get_python_ast_analyzer()
+        file_analysis = ast_analyzer.analyze_file(file_path)
+        
+        result_dict = asdict(file_analysis)
+        result["file_analysis"] = result_dict
+        analysis_methods.append("native_ast")
         
         return {
             "success": True,
-            "file_analysis": results
+            "file_path": file_path,
+            "analysis_results": result,
+            "analysis_methods": analysis_methods,
+            "symbols_count": len(file_analysis.symbols),
+            "imports_count": len(file_analysis.imports),
+            "complexity_score": file_analysis.complexity_score,
+            "lines_of_code": file_analysis.lines_of_code
         }
         
     except Exception as e:
         logger.error(f"Python file analysis failed: {e}")
         return {
             "success": False,
-            "error": f"Analysis failed: {str(e)}"
+            "error": f"Analysis failed: {str(e)}",
+            "file_path": file_path,
+            "analysis_methods": ["failed"]
         }
+
+
+def _analyze_file_via_serena(file_path: str, connection_info: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Analyze Python file via Serena MCP connection."""
+    try:
+        if connection_info["method"] == "aggregator":
+            response = requests.post(
+                f"{connection_info['url']}/analyze_file",
+                json={"file_path": file_path, "language": "python"},
+                timeout=30,
+                headers={"Content-Type": "application/json"}
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                logger.warning(f"Serena aggregator file analysis returned {response.status_code}: {response.text}")
+                return None
+                
+        elif connection_info["method"] == "individual":
+            # Individual Serena server file analysis
+            response = requests.post(
+                f"{connection_info['url']}/analyze",
+                json={"path": file_path, "type": "file"},
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                return None
+                
+    except Exception as e:
+        logger.warning(f"Serena file analysis failed: {e}")
+        return None
 
 
 @tool
@@ -570,148 +920,188 @@ def find_symbols_in_project(
     symbol_type: Optional[str] = None,
     use_serena: bool = True
 ) -> Dict[str, Any]:
-    """Find symbols (functions, classes, variables) in a project.
+    """Find symbols across the project using hybrid connection strategy.
+    
+    Search order:
+    1. MCP Aggregator with Serena (if available and use_serena=True)
+    2. Individual Serena MCP server
+    3. Native Python grep-based search (always available)
     
     Args:
         project_path: Path to project root
-        symbol_name: Name or pattern to search for
-        symbol_type: Type of symbol to find (function, class, variable, etc.)
-        use_serena: Whether to use Serena for semantic search
+        symbol_name: Name of symbol to search for
+        symbol_type: Type of symbol (function, class, variable, etc.)
+        use_serena: Whether to attempt Serena semantic search
         
     Returns:
-        Dict with found symbols
+        Dict with found symbols and their locations
     """
     try:
         project_path = os.path.abspath(project_path)
-        found_symbols = []
+        analysis_methods = []
+        results = []
         
-        # Try Serena first if available and requested
+        # Try Serena semantic search first if requested
         if use_serena:
-            serena_analyzer = get_serena_analyzer()
-            if serena_analyzer.is_available():
-                symbols = serena_analyzer.find_symbols(symbol_name, project_path)
-                found_symbols.extend(symbols)
-        
-        # Fall back to AST analysis for Python files
-        if not found_symbols or not use_serena:
-            ast_analyzer = get_python_ast_analyzer()
+            connection_info = _mcp_analysis_manager.get_connection_info("serena")
             
-            for py_file in Path(project_path).rglob('*.py'):
-                try:
-                    analysis = ast_analyzer.analyze_file(str(py_file))
-                    for symbol in analysis.symbols:
-                        if symbol_name.lower() in symbol.name.lower():
-                            if not symbol_type or symbol.kind == symbol_type:
-                                found_symbols.append(symbol)
-                except Exception as e:
-                    logger.warning(f"Failed to analyze {py_file}: {e}")
+            if connection_info["available"] and connection_info["method"] != "native":
+                serena_results = _find_symbols_via_serena(project_path, symbol_name, symbol_type, connection_info)
+                if serena_results:
+                    results.extend(serena_results)
+                    analysis_methods.append(f"serena_{connection_info['method']}")
+                    logger.info(f"Serena symbol search completed via {connection_info['method']}")
+        
+        # Always include native search as baseline/fallback
+        native_results = _find_symbols_native(project_path, symbol_name, symbol_type)
+        if native_results:
+            results.extend(native_results)
+            analysis_methods.append("native_search")
+        
+        # Remove duplicates based on file_path and line_number
+        unique_results = []
+        seen = set()
+        for result in results:
+            key = (result.get('file_path', ''), result.get('line_number', 0))
+            if key not in seen:
+                seen.add(key)
+                unique_results.append(result)
         
         return {
             "success": True,
-            "symbols_found": len(found_symbols),
-            "symbols": [asdict(symbol) for symbol in found_symbols],
-            "search_method": "serena" if use_serena and found_symbols else "ast"
+            "symbol_name": symbol_name,
+            "symbol_type": symbol_type,
+            "project_path": project_path,
+            "results": unique_results,
+            "total_found": len(unique_results),
+            "analysis_methods": analysis_methods
         }
         
     except Exception as e:
         logger.error(f"Symbol search failed: {e}")
         return {
             "success": False,
-            "error": f"Search failed: {str(e)}"
+            "error": f"Symbol search failed: {str(e)}",
+            "symbol_name": symbol_name,
+            "analysis_methods": ["failed"]
         }
 
 
-@tool
-def get_code_complexity_metrics(
-    file_or_project_path: str,
-    language: str = "python"
-) -> Dict[str, Any]:
-    """Get code complexity metrics for a file or project.
-    
-    Args:
-        file_or_project_path: Path to file or project
-        language: Programming language (currently supports 'python')
-        
-    Returns:
-        Dict with complexity metrics
-    """
+def _find_symbols_via_serena(project_path: str, symbol_name: str, symbol_type: Optional[str], 
+                            connection_info: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Find symbols via Serena MCP connection."""
     try:
-        path = Path(file_or_project_path)
-        
-        if path.is_file():
-            # Analyze single file
-            if language.lower() == "python" and str(path).endswith('.py'):
-                ast_analyzer = get_python_ast_analyzer()
-                analysis = ast_analyzer.analyze_file(str(path))
-                
-                return {
-                    "success": True,
-                    "file_metrics": {
-                        "file_path": str(path),
-                        "complexity_score": analysis.complexity_score,
-                        "lines_of_code": analysis.lines_of_code,
-                        "symbol_count": len(analysis.symbols),
-                        "import_count": len(analysis.imports)
-                    }
-                }
-        
-        elif path.is_dir():
-            # Analyze project
-            total_complexity = 0
-            total_lines = 0
-            total_symbols = 0
-            total_files = 0
-            file_metrics = []
-            
-            if language.lower() == "python":
-                ast_analyzer = get_python_ast_analyzer()
-                
-                for py_file in path.rglob('*.py'):
-                    try:
-                        analysis = ast_analyzer.analyze_file(str(py_file))
-                        
-                        metrics = {
-                            "file_path": str(py_file.relative_to(path)),
-                            "complexity_score": analysis.complexity_score or 0,
-                            "lines_of_code": analysis.lines_of_code or 0,
-                            "symbol_count": len(analysis.symbols),
-                            "import_count": len(analysis.imports)
-                        }
-                        
-                        file_metrics.append(metrics)
-                        total_complexity += metrics["complexity_score"]
-                        total_lines += metrics["lines_of_code"]
-                        total_symbols += metrics["symbol_count"]
-                        total_files += 1
-                        
-                    except Exception as e:
-                        logger.warning(f"Failed to analyze {py_file}: {e}")
-            
-            return {
-                "success": True,
-                "project_metrics": {
-                    "total_files": total_files,
-                    "total_complexity": total_complexity,
-                    "total_lines_of_code": total_lines,
-                    "total_symbols": total_symbols,
-                    "average_complexity": total_complexity / max(total_files, 1),
-                    "average_lines_per_file": total_lines / max(total_files, 1)
-                },
-                "file_metrics": file_metrics[:20]  # Limit to first 20 files
-            }
-        
-        else:
-            return {
-                "success": False,
-                "error": f"Path not found: {file_or_project_path}"
-            }
-    
-    except Exception as e:
-        logger.error(f"Complexity analysis failed: {e}")
-        return {
-            "success": False,
-            "error": f"Analysis failed: {str(e)}"
+        search_params = {
+            "project_path": project_path,
+            "symbol_name": symbol_name
         }
+        if symbol_type:
+            search_params["symbol_type"] = symbol_type
+            
+        if connection_info["method"] == "aggregator":
+            response = requests.post(
+                f"{connection_info['url']}/find_symbols",
+                json=search_params,
+                timeout=30,
+                headers={"Content-Type": "application/json"}
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                return data.get("symbols", [])
+            else:
+                logger.warning(f"Serena aggregator symbol search returned {response.status_code}: {response.text}")
+                return []
+                
+        elif connection_info["method"] == "individual":
+            # Individual Serena server symbol search
+            response = requests.post(
+                f"{connection_info['url']}/search",
+                json=search_params,
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                return data.get("results", [])
+            else:
+                return []
+                
+    except Exception as e:
+        logger.warning(f"Serena symbol search failed: {e}")
+        return []
+
+
+def _find_symbols_native(project_path: str, symbol_name: str, symbol_type: Optional[str]) -> List[Dict[str, Any]]:
+    """Find symbols using native Python search."""
+    results = []
+    
+    try:
+        # Search for Python files
+        for root, dirs, files in os.walk(project_path):
+            # Skip common ignore directories
+            dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ['__pycache__', 'node_modules', 'venv', 'env']]
+            
+            for file in files:
+                if file.endswith('.py'):
+                    file_path = os.path.join(root, file)
+                    try:
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            lines = f.readlines()
+                            
+                        for line_num, line in enumerate(lines, 1):
+                            line = line.strip()
+                            
+                            # Simple pattern matching for symbols
+                            if symbol_name in line:
+                                # Check for function definitions
+                                if symbol_type in [None, 'function'] and f"def {symbol_name}" in line:
+                                    results.append({
+                                        'file_path': file_path,
+                                        'line_number': line_num,
+                                        'symbol_type': 'function',
+                                        'line_content': line,
+                                        'symbol_name': symbol_name
+                                    })
+                                
+                                # Check for class definitions  
+                                elif symbol_type in [None, 'class'] and f"class {symbol_name}" in line:
+                                    results.append({
+                                        'file_path': file_path,
+                                        'line_number': line_num,
+                                        'symbol_type': 'class',
+                                        'line_content': line,
+                                        'symbol_name': symbol_name
+                                    })
+                                
+                                # Check for variable assignments
+                                elif symbol_type in [None, 'variable'] and f"{symbol_name} =" in line:
+                                    results.append({
+                                        'file_path': file_path,
+                                        'line_number': line_num,
+                                        'symbol_type': 'variable',
+                                        'line_content': line,
+                                        'symbol_name': symbol_name
+                                    })
+                                
+                                # General usage/reference
+                                elif symbol_type is None:
+                                    results.append({
+                                        'file_path': file_path,
+                                        'line_number': line_num,
+                                        'symbol_type': 'reference',
+                                        'line_content': line,
+                                        'symbol_name': symbol_name
+                                    })
+                    
+                    except Exception as e:
+                        logger.warning(f"Failed to read file {file_path}: {e}")
+                        continue
+                        
+    except Exception as e:
+        logger.error(f"Native symbol search failed: {e}")
+        
+    return results
 
 
 # Export all tools
@@ -724,6 +1114,5 @@ __all__ = [
     'ProjectStructure',
     'analyze_repository_structure',
     'analyze_python_file',
-    'find_symbols_in_project',
-    'get_code_complexity_metrics'
+    'find_symbols_in_project'
 ]
