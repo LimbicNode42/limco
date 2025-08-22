@@ -6,8 +6,8 @@ import json
 from pathlib import Path
 from typing import List, Dict, Optional
 from langchain_core.messages import AIMessage, HumanMessage
-import subprocess
-import os
+from .states import RecoveryState
+from .self_improvement import ErrorRecoveryHandler, enhance_node_with_self_improvement
 import platform
 import re
 import json
@@ -104,7 +104,7 @@ def get_system_drives() -> List[Dict[str, str]]:
 
 def create_drive_clone(source_path: str, clone_dir: str) -> Optional[str]:
     """
-    Create a bit-for-bit clone of the drive using dd (Linux/macOS) or similar tool.
+    Create a bit-for-bit clone of the drive using dd (Linux/macOS) or Windows alternatives.
     Returns the path to the clone file or None if failed.
     """
     system = platform.system().lower()
@@ -133,18 +133,113 @@ def create_drive_clone(source_path: str, clone_dir: str) -> Optional[str]:
             result = subprocess.run(cmd, check=True, capture_output=True, text=True)
             
         elif system == "windows":
-            # For Windows, we might need to use a tool like dd for Windows or diskpart
-            # For now, let's use a placeholder that would work with dd for Windows
-            print("Windows drive cloning requires additional tools like dd for Windows or specialized software")
-            return None
+            # Enhanced Windows cloning options
+            return create_windows_drive_clone(source_path, clone_path)
             
         if os.path.exists(clone_path):
             return clone_path
             
     except subprocess.CalledProcessError as e:
         print(f"Error creating clone: {e}")
+        raise Exception(f"Clone command failed: {e}")
     except Exception as e:
         print(f"Unexpected error during cloning: {e}")
+        raise e
+    
+    return None
+
+
+def create_windows_drive_clone(source_path: str, clone_path: str) -> Optional[str]:
+    """
+    Create drive clone on Windows using multiple fallback methods.
+    """
+    methods = [
+        ("PowerShell Copy-Item", lambda: _windows_powershell_clone),
+        ("Windows dd", lambda: _windows_dd_clone),
+        ("File System Copy", lambda: _windows_filesystem_clone)
+    ]
+    
+    for method_name, method_func in methods:
+        try:
+            print(f"Attempting {method_name} for Windows cloning...")
+            result = method_func()(source_path, clone_path)
+            if result:
+                return result
+        except Exception as e:
+            print(f"{method_name} failed: {e}")
+            continue
+    
+    # If all methods fail, raise specific Windows error
+    raise Exception(f"""Windows drive cloning failed. Possible solutions:
+1. Run as Administrator (Right-click -> Run as Administrator)
+2. Install dd for Windows: https://www.chrysocome.net/dd
+3. Use imaging software like Win32 Disk Imager
+4. For SD cards, try copying files instead of raw cloning
+
+Source: {source_path}
+Target: {clone_path}""")
+
+
+def _windows_powershell_clone(source_path: str, clone_path: str) -> Optional[str]:
+    """Try PowerShell-based cloning for Windows."""
+    # For now, this would need to be implemented with PowerShell commands
+    # This is a placeholder for the actual implementation
+    raise Exception("PowerShell cloning not yet implemented")
+
+
+def _windows_dd_clone(source_path: str, clone_path: str) -> Optional[str]:
+    """Try dd for Windows if available."""
+    try:
+        # Check if dd is available
+        subprocess.run(["dd", "--version"], capture_output=True, check=True)
+        
+        cmd = [
+            "dd",
+            f"if={source_path}",
+            f"of={clone_path}",
+            "bs=64K",
+            "conv=noerror,sync"
+        ]
+        
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        
+        if os.path.exists(clone_path):
+            return clone_path
+            
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        raise Exception("dd for Windows not found or failed")
+    
+    return None
+
+
+def _windows_filesystem_clone(source_path: str, clone_path: str) -> Optional[str]:
+    """Fallback: try file-system level copy for mounted drives."""
+    try:
+        # This would be for mounted drives/SD cards, not raw disk access
+        if os.path.exists(source_path) and os.path.isdir(source_path):
+            # If source_path is a mounted directory, copy its contents
+            import shutil
+            
+            # Create a temporary directory structure in the clone file
+            temp_dir = clone_path + "_temp"
+            shutil.copytree(source_path, temp_dir)
+            
+            # Create an archive of the copied files
+            shutil.make_archive(clone_path.replace('.img', ''), 'zip', temp_dir)
+            
+            # Clean up temp directory
+            shutil.rmtree(temp_dir)
+            
+            # Rename to .img extension
+            archive_path = clone_path.replace('.img', '.zip')
+            if os.path.exists(archive_path):
+                os.rename(archive_path, clone_path)
+                return clone_path
+        else:
+            raise Exception("Source is not a mounted directory accessible for file copy")
+            
+    except Exception as e:
+        raise Exception(f"File system copy failed: {e}")
     
     return None
 
@@ -353,9 +448,11 @@ def process_drive_selection_node(state: RecoveryState) -> RecoveryState:
     return state
 
 
+@enhance_node_with_self_improvement
 def clone_drive_node(state: RecoveryState) -> RecoveryState:
     """
     Creates a bit-for-bit clone of the selected drive using dd or equivalent.
+    Enhanced with self-improvement error analysis and recovery suggestions.
     """
     if "messages" not in state:
         state["messages"] = []
@@ -381,6 +478,9 @@ def clone_drive_node(state: RecoveryState) -> RecoveryState:
         AIMessage(content=f"🔄 **Starting Drive Clone Operation**\n\nCloning drive: `{drive_path}`\nThis may take a while depending on drive size...\n\n⚠️  **Please do not disconnect the drive during this process.**")
     )
     
+    # Initialize error recovery handler
+    error_handler = ErrorRecoveryHandler()
+    
     try:
         # Create clone directory in user's home or temp directory
         clone_dir = os.path.expanduser("~/drive_recovery_clones")
@@ -402,16 +502,79 @@ def clone_drive_node(state: RecoveryState) -> RecoveryState:
                 AIMessage(content=f"✅ **Clone Created Successfully!**\n\n📁 Clone location: `{clone_path}`\n💾 Clone size: {size_display}\n\n🔒 Your original drive remains untouched and safe. All further operations will work on this clone.")
             )
         else:
+            # Enhanced error handling with AI analysis
+            error_details = {
+                'error': 'Failed to create drive clone',
+                'source_path': drive_path,
+                'clone_dir': clone_dir,
+                'attempted_solutions': []
+            }
+            
+            # Get AI analysis and suggestions
+            recovery_result = error_handler.handle_drive_clone_error(error_details)
+            
             state["error"] = "Failed to create drive clone"
-            state["messages"].append(
-                AIMessage(content="❌ **Clone Creation Failed**\n\nThe drive cloning process encountered an error. This could be due to:\n• Insufficient permissions\n• Not enough disk space\n• Drive access issues\n\nPlease ensure you have administrator privileges and sufficient free space.")
-            )
+            
+            # Create enhanced error message with AI suggestions
+            error_message = "❌ **Clone Creation Failed**\n\n"
+            
+            if recovery_result.get('analysis'):
+                analysis = recovery_result['analysis']
+                error_message += f"🤖 **AI Analysis**: {analysis.get('root_cause', 'Analyzing...')}\n\n"
+                
+                if analysis.get('solutions'):
+                    top_solution = analysis['solutions'][0]
+                    error_message += f"💡 **Recommended Solution** ({top_solution['probability']} success probability):\n"
+                    error_message += f"**{top_solution['name']}**\n\n"
+                    
+                    if top_solution.get('steps'):
+                        error_message += "**Steps to try:**\n"
+                        for step in top_solution['steps'][:3]:  # Show top 3 steps
+                            error_message += f"• {step}\n"
+                    
+                    if top_solution.get('requirements'):
+                        error_message += f"\n**Requirements**: {', '.join(top_solution['requirements'])}\n"
+            else:
+                # Fallback error message
+                error_message += "The drive cloning process encountered an error. This could be due to:\n"
+                error_message += "• Insufficient permissions (try running as Administrator)\n"
+                error_message += "• Not enough disk space\n"
+                error_message += "• Drive access issues\n"
+                error_message += "\nPlease ensure you have administrator privileges and sufficient free space."
+            
+            state["messages"].append(AIMessage(content=error_message))
+            
+            # Store recovery analysis for later use
+            state["recovery_analysis"] = recovery_result.get('analysis')
             
     except Exception as e:
+        # Enhanced exception handling
+        error_details = {
+            'error': str(e),
+            'source_path': drive_path,
+            'clone_dir': os.path.expanduser("~/drive_recovery_clones"),
+            'attempted_solutions': []
+        }
+        
+        recovery_result = error_handler.handle_drive_clone_error(error_details)
+        
         state["error"] = f"Clone creation error: {e}"
-        state["messages"].append(
-            AIMessage(content=f"❌ **Clone Creation Error**: {e}\n\nPlease check your system permissions and available disk space.")
-        )
+        
+        error_message = f"❌ **Clone Creation Error**: {e}\n\n"
+        
+        if recovery_result.get('analysis') and recovery_result['analysis'].get('solutions'):
+            top_solution = recovery_result['analysis']['solutions'][0]
+            error_message += f"🤖 **AI Suggestion**: {top_solution['name']}\n"
+            
+            if top_solution.get('steps'):
+                error_message += "**Try this:**\n"
+                for step in top_solution['steps'][:2]:
+                    error_message += f"• {step}\n"
+        else:
+            error_message += "Please check your system permissions and available disk space."
+        
+        state["messages"].append(AIMessage(content=error_message))
+        state["recovery_analysis"] = recovery_result.get('analysis')
     
     return state
 

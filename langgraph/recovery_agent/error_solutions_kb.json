@@ -1,0 +1,89 @@
+{
+  "drive_clone_failure_drive_cloning_windows": {
+    "root_cause": "The drive cloning failure appears to stem from insufficient permissions (User Privileges: 0) and possibly locked/in-use drive status. Windows requires elevated privileges for direct disk access, and the target path structure suggests potential path formatting issues.",
+    "solutions": [
+      {
+        "name": "Elevated Administrator Access with DiskPart",
+        "probability": "high",
+        "steps": [
+          "Open Command Prompt as Administrator",
+          "Use DiskPart to ensure drive isn't in use",
+          "Create image using administrative tools"
+        ],
+        "commands": [
+          "diskpart",
+          "list disk",
+          "select disk 7",
+          "offline disk",
+          "create image=\"C:\\Users\\bjwhe\\drive_recovery_clones\\clone.img\""
+        ],
+        "requirements": [
+          "Administrator privileges",
+          "Sufficient free space on target drive",
+          "Target drive not in active use"
+        ],
+        "risks": "Data loss if wrong disk selected",
+        "expected_outcome": "Complete disk image creation with full system access"
+      },
+      {
+        "name": "Third-Party Imaging Software Solution",
+        "probability": "high",
+        "steps": [
+          "Download and install Macrium Reflect Free",
+          "Launch as Administrator",
+          "Select source drive",
+          "Choose image destination",
+          "Execute cloning operation"
+        ],
+        "commands": [
+          "\"C:\\Program Files\\Macrium\\Reflect\\reflect.exe\" -e -w",
+          "reflect.exe -clone -d 7 -path \"C:\\Users\\bjwhe\\drive_recovery_clones\""
+        ],
+        "requirements": [
+          "Macrium Reflect installation",
+          "Administrator privileges",
+          "Sufficient storage space"
+        ],
+        "risks": "Software compatibility issues",
+        "expected_outcome": "Successful drive image creation with verification"
+      },
+      {
+        "name": "DD for Windows Implementation",
+        "probability": "medium",
+        "steps": [
+          "Download dd for Windows",
+          "Open Command Prompt as Administrator",
+          "Navigate to dd directory",
+          "Execute dd command with proper parameters"
+        ],
+        "commands": [
+          "dd if=\\\\.\\PHYSICALDRIVE7 of=\"C:\\Users\\bjwhe\\drive_recovery_clones\\clone.img\" bs=4M conv=noerror,sync"
+        ],
+        "requirements": [
+          "DD for Windows installation",
+          "Administrator privileges",
+          "Direct disk access"
+        ],
+        "risks": "Potential data corruption if interrupted",
+        "expected_outcome": "Raw disk image creation"
+      }
+    ],
+    "preventive_measures": [
+      "Always run disk operations with administrative privileges",
+      "Verify target drive path exists and has correct permissions",
+      "Ensure sufficient free space before starting operation",
+      "Disconnect or offline source drive from other processes",
+      "Use UNC paths to avoid path formatting issues"
+    ],
+    "alternative_approaches": [
+      "Use hardware-based disk duplicator",
+      "Boot from Linux live USB and use ddrescue",
+      "Use Windows Volume Shadow Copy Service (VSS) for online backup",
+      "File-level backup instead of raw disk clone",
+      "Use Windows built-in backup and restore functionality"
+    ],
+    "timestamp": "2025-08-22T22:24:44.233548",
+    "error_signature": "drive_clone_failure_drive_cloning_windows",
+    "source": "ai_analysis"
+  }
+}

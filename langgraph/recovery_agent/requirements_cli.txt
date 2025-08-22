@@ -1,0 +1,25 @@
+# CLI Recovery Tool Requirements
+# Minimal requirements for basic functionality (no AI features)
+
+# Optional AI dependencies (install only if you want AI-powered analysis)
+# Uncomment these lines and run: pip install -r requirements.txt
+# langchain-anthropic>=0.2.0
+# langchain-core>=0.3.0
+
+# The CLI tool works without these dependencies in "basic mode"
+# Basic mode provides:
+# - Drive scanning and detection
+# - Basic drive health checks  
+# - Drive cloning (dd on Unix, multiple methods on Windows)
+# - Manual error troubleshooting
+
+# For full AI-powered features, you need:
+# 1. Uncomment the langchain dependencies above
+# 2. Set environment variable: ANTHROPIC_API_KEY=your_api_key
+# 3. Run: pip install -r requirements.txt
+
+# AI features include:
+# - Intelligent error analysis and suggestions
+# - Drive corruption detection and recovery planning
+# - Automatic solution suggestions for cloning failures
+# - Learning from previous errors

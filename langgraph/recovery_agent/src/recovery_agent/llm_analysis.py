@@ -18,9 +18,9 @@ class RecoveryAnalystLLM:
     def __init__(self):
         """Initialize the Claude 3.5 Sonnet model."""
         self.model = ChatAnthropic(
-            model="claude-3-5-sonnet-20241022",
+            model="claude-sonnet-4-20250514",
             api_key=os.getenv("ANTHROPIC_API_KEY"),
-            temperature=0.1  # Low temperature for consistent, technical analysis
+            temperature=0.2  # Low temperature for consistent, technical analysis
         )
     
     def analyze_drive_corruption(self, analysis_results: Dict[str, str], 
