@@ -1,0 +1,12 @@
+{
+    "graphs": {
+      "default": "src.recovery_agent.main:app"
+    },
+    "dependencies": [
+        "langgraph",
+        "crewai",
+        "duckduckgo-search",
+        "langchain_community",
+        "python-dotenv"
+    ]
+}

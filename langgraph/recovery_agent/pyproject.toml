@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "recovery-agent"
+version = "0.1.0"
+description = "An agentic solution for recovering data from corrupted drives."
+authors = ["GitHub Copilot"]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+langgraph = "^0.0.44"
+crewai = "^0.28.8"
+duckduckgo-search = "^5.1.0"
+langchain_community = "^0.0.31"
+python-dotenv = "^1.0.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
