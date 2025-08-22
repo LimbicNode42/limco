@@ -6,6 +6,7 @@ from .nodes import (
     process_drive_selection_node,
     clone_drive_node,
     analyze_partitions_node,
+    llm_analysis_node,
     generate_recovery_plan_node,
     execute_recovery_plan_node,
     human_in_the_loop_node,
@@ -32,6 +33,7 @@ def create_recovery_graph():
     workflow.add_node("process_drive_selection", process_drive_selection_node)
     workflow.add_node("clone_drive", clone_drive_node)
     workflow.add_node("analyze_partitions", analyze_partitions_node)
+    workflow.add_node("llm_analysis", llm_analysis_node)
     workflow.add_node("generate_recovery_plan", generate_recovery_plan_node)
     workflow.add_node("human_in_the_loop", human_in_the_loop_node)
     workflow.add_node("process_approval", process_approval_node)
@@ -62,6 +64,14 @@ def create_recovery_graph():
     workflow.add_conditional_edges(
         "analyze_partitions",
         analyze_partitions_edge,
+        {
+            "llm_analysis": "llm_analysis",
+            "__end__": END,
+        },
+    )
+    workflow.add_conditional_edges(
+        "llm_analysis",
+        analyze_partitions_edge,  # Reuse the same edge logic
         {
             "generate_recovery_plan": "generate_recovery_plan",
             "__end__": END,

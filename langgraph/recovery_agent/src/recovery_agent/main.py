@@ -1,5 +1,9 @@
+import os
+from dotenv import load_dotenv
 from .graph import create_recovery_graph
 
+# Load environment variables from .env file
+load_dotenv()
 
 app = create_recovery_graph()
 

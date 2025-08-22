@@ -2,11 +2,13 @@
     "graphs": {
       "default": "src.recovery_agent.main:app"
     },
+    "env": ".env",
     "dependencies": [
         "langgraph",
         "crewai",
         "duckduckgo-search",
         "langchain_community",
-        "python-dotenv"
+        "python-dotenv",
+        "langchain-anthropic"
     ]
 }

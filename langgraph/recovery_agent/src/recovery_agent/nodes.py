@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import List, Dict, Optional
 from langchain_core.messages import AIMessage, HumanMessage
 from .states import RecoveryState
+from .llm_analysis import RecoveryAnalystLLM
 
 
 def get_system_drives() -> List[Dict[str, str]]:
@@ -445,8 +446,8 @@ def analyze_partitions_node(state: RecoveryState) -> RecoveryState:
         
         state["analysis_results"] = analysis_results
         
-        # Format analysis results for display
-        analysis_summary = "📊 **Partition Analysis Results:**\n\n"
+        # Format basic analysis results for display
+        analysis_summary = "📊 **Basic Partition Analysis Results:**\n\n"
         healthy_count = 0
         corrupted_count = 0
         repair_needed_count = 0
@@ -467,15 +468,10 @@ def analyze_partitions_node(state: RecoveryState) -> RecoveryState:
         # Add summary statistics
         analysis_summary += f"\n📈 **Summary**: {healthy_count} healthy, {repair_needed_count} need repair, {corrupted_count} corrupted"
         
-        # Add specific recommendations for common corruption patterns
-        if corrupted_count > 0:
-            analysis_summary += "\n\n🚨 **Critical Issues Detected**: Boot sector or partition table corruption found. Recovery tools will be needed."
-        elif repair_needed_count > 0:
-            analysis_summary += "\n\n⚠️  **Repairable Issues**: Filesystem errors detected that can likely be fixed with repair tools."
-        else:
-            analysis_summary += "\n\n✅ **Good News**: No critical corruption detected!"
-        
         state["messages"].append(AIMessage(content=analysis_summary))
+        
+        # Now trigger LLM analysis for deeper insights
+        state["messages"].append(AIMessage(content="🧠 **Starting AI-Powered Deep Analysis**\n\nClaude is analyzing the corruption patterns to provide expert insights and recommendations..."))
         
     except Exception as e:
         state["error"] = f"Analysis error: {e}"
@@ -486,9 +482,78 @@ def analyze_partitions_node(state: RecoveryState) -> RecoveryState:
     return state
 
 
+def llm_analysis_node(state: RecoveryState) -> RecoveryState:
+    """
+    Uses Claude 3.5 Sonnet to provide intelligent analysis of corruption patterns.
+    """
+    if "messages" not in state:
+        state["messages"] = []
+    
+    analysis_results = state.get("analysis_results", {})
+    if not analysis_results:
+        state["messages"].append(AIMessage(content="❌ No analysis results available for AI evaluation."))
+        return state
+    
+    try:
+        # Initialize the LLM analyst
+        analyst = RecoveryAnalystLLM()
+        
+        # Get drive info for context
+        drive_info = None
+        if state.get("drive_details"):
+            selected_drive = state.get("selected_drive", "")
+            for drive in state["drive_details"]:
+                if drive["name"] in selected_drive or drive["path"] in selected_drive:
+                    drive_info = drive
+                    break
+        
+        # Get LLM analysis
+        full_analysis, severity, recommendations = analyst.analyze_drive_corruption(
+            analysis_results, drive_info
+        )
+        
+        # Store results in state
+        state["llm_analysis"] = full_analysis
+        state["corruption_severity"] = severity
+        state["llm_recommendations"] = recommendations
+        
+        # Format the LLM analysis for display
+        severity_emoji = {
+            "Critical": "🚨",
+            "High": "⚠️",
+            "Medium": "🟡", 
+            "Low": "✅"
+        }
+        
+        analysis_message = f"""🧠 **AI Analysis Complete** {severity_emoji.get(severity, '📋')}
+
+**Severity Level**: {severity}
+
+**Expert Analysis**:
+{full_analysis}
+
+**AI Recommendations**:
+"""
+        
+        for i, rec in enumerate(recommendations, 1):
+            analysis_message += f"{i}. {rec}\n"
+        
+        analysis_message += "\n💡 **Next Step**: I'll generate a detailed recovery plan based on this analysis."
+        
+        state["messages"].append(AIMessage(content=analysis_message))
+        
+    except Exception as e:
+        state["error"] = f"LLM analysis error: {e}"
+        state["messages"].append(
+            AIMessage(content=f"❌ **AI Analysis Error**: {e}\n\nFalling back to standard analysis. The basic corruption assessment is still available for recovery planning.")
+        )
+    
+    return state
+
+
 def generate_recovery_plan_node(state: RecoveryState) -> RecoveryState:
     """
-    Generates a detailed recovery plan based on the partition analysis results.
+    Generates a detailed recovery plan using AI analysis and expert knowledge.
     """
     if "messages" not in state:
         state["messages"] = []
@@ -499,34 +564,62 @@ def generate_recovery_plan_node(state: RecoveryState) -> RecoveryState:
         return state
         
     state["messages"].append(
-        AIMessage(content="🛠️ **Generating Recovery Plan**\n\nAnalyzing corruption patterns and determining optimal recovery strategy...")
+        AIMessage(content="🛠️ **Generating AI-Powered Recovery Plan**\n\nClaude is creating a detailed, step-by-step recovery strategy based on the corruption analysis...")
     )
     
     try:
-        # Generate comprehensive recovery strategy
-        recovery_plan = generate_recovery_strategy(analysis_results)
+        # Initialize the LLM analyst
+        analyst = RecoveryAnalystLLM()
+        
+        # Get LLM analysis data
+        severity = state.get("corruption_severity", "Medium")
+        recommendations = state.get("llm_recommendations", [])
+        
+        # Generate comprehensive recovery strategy using LLM
+        if recommendations:
+            # Use LLM to generate detailed plan
+            recovery_plan = analyst.generate_recovery_plan(analysis_results, severity, recommendations)
+        else:
+            # Fall back to basic strategy if LLM analysis failed
+            recovery_plan = generate_recovery_strategy(analysis_results)
+        
         state["recovery_plan"] = recovery_plan
         
-        # Create detailed plan with safety warnings
-        plan_message = f"📋 **Recovery Plan Generated**\n\n{recovery_plan}\n\n"
+        # Create detailed plan message with safety warnings
+        plan_message = f"📋 **AI-Generated Recovery Plan**\n\n{recovery_plan}\n\n"
         plan_message += "🔒 **Safety Measures in Place:**\n"
         plan_message += "• All operations performed on cloned drive only\n"
         plan_message += "• Original drive remains completely untouched\n"
         plan_message += "• Multiple backup points during recovery process\n"
         plan_message += "• Each step requires your explicit approval\n\n"
-        plan_message += "❓ **Do you approve this recovery plan?**\n"
+        
+        # Add severity-specific warnings
+        if severity in ["Critical", "High"]:
+            plan_message += "⚠️ **HIGH RISK SCENARIO**: This recovery involves significant corruption. Professional data recovery services might be advisable for irreplaceable data.\n\n"
+        
+        plan_message += "❓ **Do you approve this AI-generated recovery plan?**\n"
         plan_message += "Please respond with:\n"
-        plan_message += "• `yes` or `approve` to proceed\n"
+        plan_message += "• `yes` or `approve` to proceed with the plan\n"
         plan_message += "• `no` or `cancel` to abort for safety\n"
+        plan_message += "• `explain [step number]` to get more details about a specific step\n"
         plan_message += "• `modify` to discuss alternative approaches"
         
         state["messages"].append(AIMessage(content=plan_message))
         
     except Exception as e:
-        state["error"] = f"Recovery plan generation error: {e}"
-        state["messages"].append(
-            AIMessage(content=f"❌ **Recovery Plan Error**: {e}\n\nCould not generate a recovery plan. This might indicate complex corruption requiring manual analysis.")
-        )
+        # Fallback to basic recovery planning
+        state["error"] = f"AI recovery plan generation error: {e}"
+        
+        # Use basic strategy as fallback
+        basic_plan = generate_recovery_strategy(analysis_results)
+        state["recovery_plan"] = basic_plan
+        
+        fallback_message = f"⚠️ **AI Planning Error**: {e}\n\n"
+        fallback_message += f"**Fallback Recovery Plan**:\n{basic_plan}\n\n"
+        fallback_message += "🔒 **Safety Measures**: All operations on cloned drive only.\n\n"
+        fallback_message += "Do you approve this basic recovery plan? (yes/no)"
+        
+        state["messages"].append(AIMessage(content=fallback_message))
     
     return state
 

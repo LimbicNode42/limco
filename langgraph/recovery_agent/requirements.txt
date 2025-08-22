@@ -1,4 +1,5 @@
 langgraph
+langchain-anthropic
 crewai
 duckduckgo-search
 langchain_community

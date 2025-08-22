@@ -21,6 +21,11 @@ class RecoveryState(TypedDict):
     recovery_plan: Optional[str]
     recovery_completed: Optional[bool]
     
+    # LLM Analysis results
+    llm_analysis: Optional[str]  # AI-generated analysis summary
+    corruption_severity: Optional[str]  # Critical/High/Medium/Low
+    llm_recommendations: Optional[List[str]]  # AI-generated recommendations
+    
     # Human interaction
     human_approval: Optional[bool]
     awaiting_drive_selection: Optional[bool]
