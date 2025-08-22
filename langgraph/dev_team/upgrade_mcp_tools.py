@@ -37,6 +37,13 @@ MCP_TOOLS = [
         "config_name": "MCP_ANALYSIS_CONFIG", 
         "manager_name": "MCPAnalysisConnectionManager",
         "ports": {"serena": 6976, "repomapper": 6977}
+    },
+    {
+        "file": "github_mcp.py",
+        "servers": ["github-mcp-server"],
+        "config_name": "MCP_GITHUB_CONFIG",
+        "manager_name": "MCPGitHubConnectionManager",
+        "ports": {"github-mcp-server": 6978}
     }
 ]
 
