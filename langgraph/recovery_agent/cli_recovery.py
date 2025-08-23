@@ -564,6 +564,7 @@ class CLIDriveRecovery:
                     return {
                         'success': True,
                         'method_used': 'raw_copy',
+                        'clone_path': clone_path,
                         'total_bytes': total_copied,
                         'message': f'Raw copy completed: {total_copied} bytes'
                     }
@@ -616,6 +617,8 @@ class CLIDriveRecovery:
             if result.returncode == 0:
                 return {
                     'success': True,
+                    'method_used': 'powershell_stream',
+                    'clone_path': clone_path,
                     'output': result.stdout,
                     'error': result.stderr if result.stderr else None
                 }
@@ -713,6 +716,7 @@ try {{
                         return {
                             'success': True,
                             'method_used': 'powershell_stream',
+                            'clone_path': clone_path,
                             'total_bytes': total_bytes,
                             'output': result.stdout
                         }
@@ -777,6 +781,7 @@ try {{
                 return {
                     'success': True,
                     'method_used': 'filesystem_copy',
+                    'clone_path': clone_path,
                     'total_bytes': total_size,
                     'message': f'Successfully copied {total_size} bytes'
                 }
@@ -832,6 +837,7 @@ try {{
                 return {
                     'success': True,
                     'method_used': 'dd',
+                    'clone_path': clone_path,
                     'output': result.stdout,
                     'error': result.stderr if result.stderr else None
                 }
@@ -893,7 +899,13 @@ try {{
         if result['success']:
             print("[SUCCESS] Cloning completed successfully!")
             print(f"   Method: {result['method_used']}")
-            print(f"   Clone saved to: {result['clone_path']}")
+            if 'clone_path' in result:
+                print(f"   Clone saved to: {result['clone_path']}")
+            if 'total_bytes' in result:
+                total_gb = result['total_bytes'] / (1024**3)
+                print(f"   Data copied: {result['total_bytes']:,} bytes ({total_gb:.2f} GB)")
+            if 'message' in result:
+                print(f"   Details: {result['message']}")
         else:
             print("[FAILED] Cloning failed!")
             print(f"   Error: {result['error']}")
