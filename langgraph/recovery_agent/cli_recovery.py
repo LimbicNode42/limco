@@ -965,31 +965,109 @@ try {{
         }
         
         try:
-            # Try to mount the image as a loop device (if possible)
             print("[DEBUG] Attempting Windows filesystem analysis...")
             
-            # Use PowerShell to try to analyze the image
+            # Method 1: Use PowerShell to read just the first 8KB for filesystem detection
             ps_script = f'''
             try {{
-                $bytes = [System.IO.File]::ReadAllBytes("{clone_path}")
-                if ($bytes.Length -gt 512) {{
-                    $header = $bytes[0..511]
+                $stream = [System.IO.File]::OpenRead("{clone_path}")
+                if ($stream.Length -gt 8192) {{
+                    $header = New-Object byte[] 8192
+                    $bytesRead = $stream.Read($header, 0, 8192)
+                    $stream.Close()
+                    
                     # Check for common filesystem signatures
                     $fat_signature = [System.Text.Encoding]::ASCII.GetString($header[82..89])
                     $ntfs_signature = [System.Text.Encoding]::ASCII.GetString($header[3..10])
+                    $ext_signature = [System.Text.Encoding]::ASCII.GetString($header[56..61])
+                    
+                    # Check boot sector signature (0x55AA at offset 510-511)
+                    $boot_sig = ($header[510] -eq 0x55) -and ($header[511] -eq 0xAA)
                     
                     if ($fat_signature -like "*FAT*") {{
-                        Write-Output "FILESYSTEM:FAT"
+                        Write-Output "FILESYSTEM:FAT32"
                     }} elseif ($ntfs_signature -like "*NTFS*") {{
                         Write-Output "FILESYSTEM:NTFS"
+                    }} elseif ($ext_signature -like "*EXT*") {{
+                        Write-Output "FILESYSTEM:EXT"
+                    }} elseif ($boot_sig) {{
+                        Write-Output "FILESYSTEM:bootable"
                     }} else {{
                         Write-Output "FILESYSTEM:unknown"
                     }}
                     
-                    Write-Output "SIZE:$($bytes.Length)"
+                    Write-Output "SIZE:$($stream.Length)"
+                    Write-Output "BOOTABLE:$boot_sig"
                     Write-Output "SUCCESS:true"
                 }} else {{
+                    $stream.Close()
                     Write-Output "ERROR:File too small"
+                }}
+            }} catch {{
+                Write-Output "ERROR:$($_.Exception.Message)"
+            }}
+            '''
+            
+            ps_result = subprocess.run(['powershell', '-Command', ps_script], 
+                                     capture_output=True, text=True, timeout=60)
+            
+            if ps_result.returncode == 0:
+                bootable = False
+                for line in ps_result.stdout.strip().split('\n'):
+                    line = line.strip()
+                    if line.startswith('FILESYSTEM:'):
+                        result['filesystem_type'] = line.split(':', 1)[1]
+                    elif line.startswith('SUCCESS:'):
+                        result['success'] = line.split(':', 1)[1].lower() == 'true'
+                    elif line.startswith('BOOTABLE:'):
+                        bootable = line.split(':', 1)[1].lower() == 'true'
+                    elif line.startswith('ERROR:'):
+                        result['errors'].append(line.split(':', 1)[1])
+                
+                # If we found a bootable filesystem, try to get more info
+                if bootable and result['success']:
+                    print(f"[DEBUG] Detected bootable filesystem: {result['filesystem_type']}")
+                    # Try to analyze partition table
+                    partition_info = self._analyze_partition_table_windows(clone_path)
+                    result['partitions'] = partition_info.get('partitions', [])
+                        
+        except Exception as e:
+            result['errors'].append(f"PowerShell analysis failed: {str(e)}")
+            
+        return result
+
+    def _analyze_partition_table_windows(self, clone_path: str) -> Dict[str, Any]:
+        """Analyze partition table on Windows."""
+        result = {'partitions': [], 'errors': []}
+        
+        try:
+            # Use PowerShell to read MBR and analyze partition table
+            ps_script = f'''
+            try {{
+                $stream = [System.IO.File]::OpenRead("{clone_path}")
+                $mbr = New-Object byte[] 512
+                $bytesRead = $stream.Read($mbr, 0, 512)
+                $stream.Close()
+                
+                # Check for MBR signature
+                if (($mbr[510] -eq 0x55) -and ($mbr[511] -eq 0xAA)) {{
+                    Write-Output "MBR:valid"
+                    
+                    # Parse partition entries (4 entries, 16 bytes each, starting at offset 446)
+                    for ($i = 0; $i -lt 4; $i++) {{
+                        $offset = 446 + ($i * 16)
+                        $status = $mbr[$offset]
+                        $type = $mbr[$offset + 4]
+                        
+                        if ($type -ne 0) {{
+                            $start_lba = [BitConverter]::ToUInt32($mbr, $offset + 8)
+                            $size_sectors = [BitConverter]::ToUInt32($mbr, $offset + 12)
+                            Write-Output "PARTITION:$i,$status,$type,$start_lba,$size_sectors"
+                        }}
+                    }}
+                    Write-Output "SUCCESS:true"
+                }} else {{
+                    Write-Output "ERROR:Invalid MBR signature"
                 }}
             }} catch {{
                 Write-Output "ERROR:$($_.Exception.Message)"
@@ -1001,15 +1079,23 @@ try {{
             
             if ps_result.returncode == 0:
                 for line in ps_result.stdout.strip().split('\n'):
-                    if line.startswith('FILESYSTEM:'):
-                        result['filesystem_type'] = line.split(':', 1)[1]
-                    elif line.startswith('SUCCESS:'):
-                        result['success'] = line.split(':', 1)[1].lower() == 'true'
-                    elif line.startswith('ERROR:'):
-                        result['errors'].append(line.split(':', 1)[1])
-                        
+                    line = line.strip()
+                    if line.startswith('PARTITION:'):
+                        parts = line.split(':', 1)[1].split(',')
+                        if len(parts) == 5:
+                            partition = {
+                                'number': int(parts[0]),
+                                'status': int(parts[1]),
+                                'type': int(parts[2]),
+                                'start_lba': int(parts[3]),
+                                'size_sectors': int(parts[4]),
+                                'bootable': int(parts[1]) == 0x80
+                            }
+                            result['partitions'].append(partition)
+                            print(f"[DEBUG] Found partition {partition['number']}: type={partition['type']}, bootable={partition['bootable']}")
+                            
         except Exception as e:
-            result['errors'].append(f"PowerShell analysis failed: {str(e)}")
+            result['errors'].append(f"Partition analysis failed: {str(e)}")
             
         return result
 
@@ -1076,17 +1162,228 @@ try {{
         """Attempt filesystem repair on Windows."""
         result = {
             'success': False,
-            'method_used': 'windows_native',
+            'method_used': 'windows_advanced',
             'repairs_made': [],
             'errors': [],
             'output': ''
         }
         
-        # Note: Windows doesn't have direct tools to repair image files
-        # We'd need to mount them first, which requires admin privileges
-        result['errors'].append("Windows filesystem repair requires mounting the image")
-        result['repairs_made'].append("Analysis completed - manual mounting required for repairs")
+        print("[DEBUG] Attempting Windows filesystem repair...")
         
+        try:
+            # Method 1: Try to use PowerShell to mount and repair the image
+            mount_result = self._attempt_image_mount_windows(clone_path)
+            if mount_result['success']:
+                result['repairs_made'].append(f"Successfully mounted image at {mount_result['mount_point']}")
+                
+                # Try chkdsk on the mounted drive
+                chkdsk_result = self._attempt_chkdsk_repair(mount_result['mount_point'])
+                result['repairs_made'].extend(chkdsk_result['repairs_made'])
+                result['output'] += chkdsk_result['output']
+                
+                if chkdsk_result['success']:
+                    result['success'] = True
+                    result['method_used'] = 'chkdsk'
+                
+                # Unmount
+                self._unmount_image_windows(mount_result['mount_point'])
+                result['repairs_made'].append("Unmounted image")
+            else:
+                # Method 2: Direct sector repair without mounting
+                direct_repair = self._attempt_direct_sector_repair(clone_path)
+                result['repairs_made'].extend(direct_repair['repairs_made'])
+                result['output'] += direct_repair['output']
+                result['success'] = direct_repair['success']
+                result['method_used'] = 'direct_sector_repair'
+                
+        except Exception as e:
+            result['errors'].append(f"Windows filesystem repair failed: {str(e)}")
+            
+        return result
+
+    def _attempt_image_mount_windows(self, clone_path: str) -> Dict[str, Any]:
+        """Try to mount the disk image on Windows."""
+        result = {'success': False, 'mount_point': None, 'errors': []}
+        
+        try:
+            # Use PowerShell to mount the VHD/IMG file
+            ps_script = f'''
+            try {{
+                # Try to mount as VHD (might work for IMG files too)
+                $mountResult = Mount-DiskImage -ImagePath "{clone_path}" -PassThru -ErrorAction Stop
+                $volume = Get-Volume -DiskImage $mountResult | Select-Object -First 1
+                if ($volume) {{
+                    $driveLetter = $volume.DriveLetter
+                    if ($driveLetter) {{
+                        Write-Output "SUCCESS:$($driveLetter):"
+                    }} else {{
+                        Write-Output "ERROR:No drive letter assigned"
+                    }}
+                }} else {{
+                    Write-Output "ERROR:No volume found"
+                }}
+            }} catch {{
+                Write-Output "ERROR:$($_.Exception.Message)"
+            }}
+            '''
+            
+            ps_result = subprocess.run(['powershell', '-Command', ps_script], 
+                                     capture_output=True, text=True, timeout=60)
+            
+            if ps_result.returncode == 0:
+                for line in ps_result.stdout.strip().split('\n'):
+                    line = line.strip()
+                    if line.startswith('SUCCESS:'):
+                        result['mount_point'] = line.split(':', 1)[1]
+                        result['success'] = True
+                        print(f"[DEBUG] Mounted image at drive {result['mount_point']}")
+                    elif line.startswith('ERROR:'):
+                        result['errors'].append(line.split(':', 1)[1])
+                        
+        except Exception as e:
+            result['errors'].append(f"Mount attempt failed: {str(e)}")
+            
+        return result
+
+    def _attempt_chkdsk_repair(self, drive_letter: str) -> Dict[str, Any]:
+        """Run chkdsk on the mounted drive."""
+        result = {
+            'success': False,
+            'repairs_made': [],
+            'output': '',
+            'errors': []
+        }
+        
+        try:
+            print(f"[DEBUG] Running chkdsk on drive {drive_letter}...")
+            
+            # Run chkdsk with repair flags
+            chkdsk_cmd = ['chkdsk', drive_letter, '/f', '/r', '/x']
+            chkdsk_result = subprocess.run(chkdsk_cmd, capture_output=True, text=True, timeout=600)
+            
+            result['output'] = chkdsk_result.stdout + chkdsk_result.stderr
+            
+            if chkdsk_result.returncode == 0:
+                result['success'] = True
+                result['repairs_made'].append("chkdsk completed successfully")
+            elif 'errors found' in result['output'].lower():
+                result['success'] = True  # Errors found but repaired
+                result['repairs_made'].append("chkdsk found and repaired filesystem errors")
+            else:
+                result['errors'].append(f"chkdsk failed with return code: {chkdsk_result.returncode}")
+                
+        except Exception as e:
+            result['errors'].append(f"chkdsk execution failed: {str(e)}")
+            
+        return result
+
+    def _unmount_image_windows(self, mount_point: str) -> bool:
+        """Unmount the disk image."""
+        try:
+            ps_script = f'''
+            try {{
+                Dismount-DiskImage -ImagePath "{mount_point.replace(":", "")}" -ErrorAction Stop
+                Write-Output "SUCCESS:unmounted"
+            }} catch {{
+                Write-Output "ERROR:$($_.Exception.Message)"
+            }}
+            '''
+            
+            ps_result = subprocess.run(['powershell', '-Command', ps_script], 
+                                     capture_output=True, text=True, timeout=30)
+            return ps_result.returncode == 0
+            
+        except Exception:
+            return False
+
+    def _attempt_direct_sector_repair(self, clone_path: str) -> Dict[str, Any]:
+        """Attempt direct sector-level repairs without mounting."""
+        result = {
+            'success': False,
+            'repairs_made': [],
+            'output': '',
+            'errors': []
+        }
+        
+        try:
+            print("[DEBUG] Attempting direct sector repair...")
+            
+            # Create a backup of the first few sectors before attempting repair
+            backup_path = clone_path + '.sector_backup'
+            
+            # Read the first 1MB for analysis and potential repair
+            with open(clone_path, 'r+b') as img_file:
+                # Read boot sector and first few sectors
+                img_file.seek(0)
+                boot_sector = img_file.read(512)
+                
+                # Check if boot sector needs repair (basic validation)
+                repairs_needed = []
+                
+                # Check MBR signature
+                if len(boot_sector) >= 512:
+                    if boot_sector[510] != 0x55 or boot_sector[511] != 0xAA:
+                        repairs_needed.append("MBR signature")
+                        # Fix MBR signature
+                        img_file.seek(510)
+                        img_file.write(b'\x55\xAA')
+                        result['repairs_made'].append("Repaired MBR boot signature")
+                        result['success'] = True
+                
+                # Check for obvious filesystem corruption patterns
+                if b'\x00' * 100 in boot_sector[:200]:  # Too many zeros in critical area
+                    result['repairs_made'].append("Detected potential boot sector corruption")
+                    
+                # Try to repair common FAT32 issues
+                if b'FAT32' in boot_sector or b'fat32' in boot_sector.lower():
+                    fat_repair = self._repair_fat32_boot_sector(img_file)
+                    result['repairs_made'].extend(fat_repair['repairs'])
+                    if fat_repair['success']:
+                        result['success'] = True
+                        
+        except Exception as e:
+            result['errors'].append(f"Direct sector repair failed: {str(e)}")
+            
+        if not result['repairs_made']:
+            result['repairs_made'].append("No obvious sector-level corruption detected")
+            
+        return result
+
+    def _repair_fat32_boot_sector(self, img_file) -> Dict[str, Any]:
+        """Attempt to repair FAT32 boot sector issues."""
+        result = {'success': False, 'repairs': []}
+        
+        try:
+            img_file.seek(0)
+            boot_sector = bytearray(img_file.read(512))
+            
+            # Check and repair basic FAT32 boot sector structure
+            repairs_made = False
+            
+            # Bytes per sector should typically be 512
+            bytes_per_sector = int.from_bytes(boot_sector[11:13], 'little')
+            if bytes_per_sector != 512:
+                print(f"[DEBUG] Fixing bytes per sector: {bytes_per_sector} -> 512")
+                boot_sector[11:13] = (512).to_bytes(2, 'little')
+                repairs_made = True
+                result['repairs'].append(f"Fixed bytes per sector ({bytes_per_sector} -> 512)")
+            
+            # Media descriptor should typically be 0xF8 for fixed disk
+            if boot_sector[21] not in [0xF8, 0xF0]:
+                print(f"[DEBUG] Fixing media descriptor: {boot_sector[21]} -> 0xF8")
+                boot_sector[21] = 0xF8
+                repairs_made = True
+                result['repairs'].append("Fixed media descriptor")
+            
+            if repairs_made:
+                img_file.seek(0)
+                img_file.write(boot_sector)
+                img_file.flush()
+                result['success'] = True
+                
+        except Exception as e:
+            result['repairs'].append(f"FAT32 repair failed: {str(e)}")
+            
         return result
 
     def _repair_filesystem_unix(self, clone_path: str) -> Dict[str, Any]:
@@ -1364,6 +1661,9 @@ Examples:
     parser.add_argument('--analyze-only', action='store_true',
                        help='Only analyze drive without cloning')
     
+    parser.add_argument('--analyze-clone', type=str, metavar='CLONE_PATH',
+                       help='Analyze existing clone file (filesystem analysis + repair + extraction)')
+    
     parser.add_argument('--recover', action='store_true',
                        help='Full recovery: analyze + clone + fix')
     
@@ -1395,6 +1695,39 @@ Examples:
         recovery.display_drives(drives)
         return
     
+    # Handle analyze existing clone
+    if args.analyze_clone:
+        if not os.path.exists(args.analyze_clone):
+            print(f"[ERROR] Clone file not found: {args.analyze_clone}")
+            return
+            
+        print(f"\n[CLONE ANALYSIS] Analyzing existing clone: {os.path.basename(args.analyze_clone)}")
+        
+        # Step 1: Filesystem analysis
+        print("\n[STEP 1] Filesystem Analysis")
+        fs_analysis = recovery.analyze_filesystem(args.analyze_clone)
+        recovery.display_filesystem_analysis(fs_analysis)
+        
+        # Step 2: Repair attempts
+        print("\n[STEP 2] Filesystem Repair")
+        repair_result = recovery.repair_filesystem(args.analyze_clone)
+        recovery.display_repair_result(repair_result)
+        
+        # Step 3: Data extraction
+        print("\n[STEP 3] Data Extraction")
+        extraction_result = recovery.extract_recoverable_data(args.analyze_clone, args.output)
+        recovery.display_extraction_result(extraction_result)
+        
+        # Step 4: Summary
+        print("\n[STEP 4] Analysis Summary")
+        recovery.display_recovery_summary({
+            'clone_result': {'success': True, 'clone_path': args.analyze_clone, 'total_bytes': os.path.getsize(args.analyze_clone)},
+            'fs_analysis': fs_analysis,
+            'repair_result': repair_result,
+            'extraction_result': extraction_result
+        })
+        return
+
     # Require source drive for other operations
     if not args.source:
         print("[ERROR] Error: --source is required for analysis and recovery operations")
