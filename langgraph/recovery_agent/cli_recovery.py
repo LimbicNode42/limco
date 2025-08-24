@@ -57,6 +57,7 @@ class CLIDriveRecovery:
             'platform': platform.platform(),
             'is_admin': self._check_admin_privileges()
         }
+        self.os_type = platform.system().lower()  # Add os_type attribute for new methods
         self.error_handler = None
         self.drive_analyzer = None
         
