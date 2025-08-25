@@ -34,12 +34,13 @@ run_as_admin() {
 show_menu() {
     echo "Choose an option:"
     echo "1. Scan drives"
-    echo "2. Analyze SD card (PhysicalDrive7) only"
+    echo "2. Analyze SD card (PhysicalDrive6) only"
     echo "3. Full recovery of SD card (analyze + clone)"
-    echo "4. Custom command"
-    echo "5. Exit"
+    echo "4. Create perfect-sized clone (115GB - guaranteed to fit)"
+    echo "5. Custom command"
+    echo "6. Exit"
     echo ""
-    echo -n "Enter your choice (1-5): "
+    echo -n "Enter your choice (1-6): "
 }
 
 # Main menu loop
@@ -54,7 +55,7 @@ while true; do
             ;;
         2)
             echo ""
-            run_as_admin "python cli_recovery.py --analyze-only --source \\\\.\\PhysicalDrive7"
+            run_as_admin "python cli_recovery.py --analyze-only --source \\\\.\\PhysicalDrive6"
             ;;
         3)
             echo ""
@@ -62,12 +63,23 @@ while true; do
             echo -n "Are you sure you want to proceed? (y/N): "
             read -r confirm
             if [[ $confirm =~ ^[Yy]$ ]]; then
-                run_as_admin "python cli_recovery.py --recover --source \\\\.\\PhysicalDrive7 --output ./sd_recovery"
+                run_as_admin "python cli_recovery.py --recover --source \\\\.\\PhysicalDrive6 --output ./sd_recovery"
             else
                 echo "Cancelled."
             fi
             ;;
         4)
+            echo ""
+            echo "[INFO] Creating perfect 115GB clone that will fit on your SD card"
+            echo -n "Are you sure you want to proceed? (y/N): "
+            read -r confirm
+            if [[ $confirm =~ ^[Yy]$ ]]; then
+                run_as_admin "python perfect_sd_clone.py \\\\.\\PhysicalDrive6 115"
+            else
+                echo "Cancelled."
+            fi
+            ;;
+        5)
             echo ""
             echo "Enter custom cli_recovery.py command (without 'python cli_recovery.py'):"
             echo "Example: --analyze-only --source \\\\.\\PhysicalDrive5"
@@ -77,7 +89,7 @@ while true; do
                 run_as_admin "python cli_recovery.py $custom_args"
             fi
             ;;
-        5)
+        6)
             echo "Goodbye!"
             exit 0
             ;;
