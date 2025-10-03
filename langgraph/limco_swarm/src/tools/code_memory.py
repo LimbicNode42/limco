@@ -1,11 +1,13 @@
+
+from reactivex import throw
+from typing import Literal, Tuple, List
+
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from typing import Optional, Literal, Tuple, List
 from langchain_core.tools import BaseTool
 
-RoleType = Literal["frontend", "backend", "fullstack"]
+RoleType = Literal["engineer_react_frontend", "engineer_react_backend", "engineer_react_fullstack"]
 
-
-async def get_code_memory_tools(role: Optional[RoleType] = None) -> List[BaseTool] | Tuple[List[BaseTool], List[BaseTool], List[BaseTool]]:
+async def get_code_memory_tools(role: RoleType = None) -> List[BaseTool] | Tuple[List[BaseTool], List[BaseTool], List[BaseTool]]:
     mcp_client = MultiServerMCPClient(
         {
             "engineer_react_frontend_code_tools": {
@@ -29,18 +31,5 @@ async def get_code_memory_tools(role: Optional[RoleType] = None) -> List[BaseToo
         return await mcp_client.get_tools(server_name="engineer_react_backend_code_tools")
     elif role == "engineer_react_fullstack":
         return await mcp_client.get_tools(server_name="engineer_react_fullstack_code_tools")
-    
-    engineer_react_frontend_code_tools = await mcp_client.get_tools(
-        server_name="engineer_react_frontend_code_tools"
-    )
-    engineer_react_backend_code_tools = await mcp_client.get_tools(
-        server_name="engineer_react_backend_code_tools"
-    )
-    engineer_react_fullstack_code_tools = await mcp_client.get_tools(
-        server_name="engineer_react_fullstack_code_tools"
-    )
-    return (
-        engineer_react_frontend_code_tools,
-        engineer_react_backend_code_tools,
-        engineer_react_fullstack_code_tools
-    )
+    else:
+        throw(ValueError("Role must be one of 'engineer_react_frontend', 'engineer_react_backend', or 'engineer_react_fullstack'."))
